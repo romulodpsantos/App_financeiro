@@ -25,7 +25,7 @@ class FinanceApp {
         console.log('✅ Inicializando sistema...');
         this.configurarEventos();
         this.atualizarDashboard();
-        this.atualizarListaTransacoes();
+        this.atualizarListaTransacoes(); // Método que estava faltando
         this.atualizarListaPessoas();
         this.atualizarListaRecorrentes();
         this.atualizarListaCartoes();
@@ -37,6 +37,157 @@ class FinanceApp {
         console.log('✅ Sistema inicializado com sucesso!');
     }
 
+    // ========== MÉTODO ADICIONADO PARA CORRIGIR O ERRO ==========
+    atualizarListaTransacoes() {
+        const container = document.getElementById('lista-transacoes');
+        if (!container) return;
+
+        let transacoes = [];
+
+        // Adiciona gastos
+        this.gastos.forEach(gasto => {
+            transacoes.push({
+                ...gasto,
+                tipo: 'gasto',
+                dataOriginal: gasto.data
+            });
+        });
+
+        // Adiciona ganhos
+        this.ganhos.forEach(ganho => {
+            transacoes.push({
+                ...ganho,
+                tipo: 'ganho',
+                pago: true // Ganhos são sempre considerados "pagos"
+            });
+        });
+
+        // Ordena por data (mais recente primeiro)
+        transacoes.sort((a, b) => new Date(b.data) - new Date(a.data));
+
+        // Aplica filtros
+        transacoes = this.aplicarFiltrosTransacoes(transacoes);
+
+        if (transacoes.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-receipt"></i><p>Nenhuma transação encontrada</p></div>';
+            return;
+        }
+
+        container.innerHTML = transacoes.map(transacao => {
+            const isGasto = transacao.tipo === 'gasto';
+            const isPago = transacao.pago;
+            const dataFormatada = this.formatarData(transacao.data);
+            const valorFormatado = this.formatarMoeda(transacao.valor);
+            const categoriaFormatada = this.formatarCategoria(transacao.categoria);
+
+            return `
+                <div class="transaction-item ${!isPago ? 'pendente' : ''}">
+                    <div class="transaction-header">
+                        <div class="transaction-info">
+                            <strong>${transacao.descricao}</strong>
+                            <div class="transaction-meta">
+                                ${dataFormatada} • ${categoriaFormatada}
+                                ${transacao.responsavel && transacao.responsavel !== 'Eu' ? ` • 👤 ${transacao.responsavel}` : ''}
+                                ${transacao.parcelaNumero ? ` • Parcela ${transacao.parcelaNumero}/${transacao.totalParcelas}` : ''}
+                            </div>
+                        </div>
+                        <div class="transaction-actions">
+                            <span class="transaction-value ${isGasto ? 'gasto' : 'ganho'}">
+                                ${isGasto ? '-' : '+'} ${valorFormatado}
+                            </span>
+                            ${isGasto && !isPago && transacao.responsavel === 'Eu' ? `
+                                <button class="btn-pagar small" onclick="app.marcarGastoPago(${transacao.id})" title="Marcar como pago">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                            ` : ''}
+                            ${isGasto && !isPago && transacao.responsavel !== 'Eu' ? `
+                                <button class="btn-pagar-parcial small" onclick="app.mostrarModalPagamentoParcial(${transacao.id})" title="Receber pagamento">
+                                    <i class="fas fa-hand-holding-usd"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="transaction-actions">
+                        <button class="btn-icon small" onclick="app.${isGasto ? 'editarGasto' : 'editarGanho'}(${transacao.id})" title="Editar">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-icon small danger" onclick="app.${isGasto ? 'excluirGasto' : 'excluirGanho'}(${transacao.id})" title="Excluir">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                        ${!isPago ? `<span class="status-badge pendente">Pendente</span>` : ''}
+                        ${isPago && isGasto ? `<span class="status-badge pago">Pago</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    aplicarFiltrosTransacoes(transacoes) {
+        let filtradas = transacoes;
+
+        // Filtro por status
+        if (this.filtrosAtivos.status === 'pendente') {
+            filtradas = filtradas.filter(t => t.tipo === 'gasto' && !t.pago);
+        } else if (this.filtrosAtivos.status === 'pago') {
+            filtradas = filtradas.filter(t => (t.tipo === 'gasto' && t.pago) || t.tipo === 'ganho');
+        }
+
+        // Filtro por pessoa
+        if (this.filtrosAtivos.pessoa !== 'todos') {
+            filtradas = filtradas.filter(t => t.responsavel === this.filtrosAtivos.pessoa);
+        }
+
+        // Filtro por data
+        if (this.filtrosAtivos.data) {
+            filtradas = filtradas.filter(t => t.data.startsWith(this.filtrosAtivos.data));
+        }
+
+        return filtradas;
+    }
+
+    aplicarFiltros() {
+        const filtroStatus = document.getElementById('filtroStatus');
+        const filtroPessoa = document.getElementById('filtroPessoa');
+        const filtroData = document.getElementById('filtroData');
+
+        if (filtroStatus) this.filtrosAtivos.status = filtroStatus.value;
+        if (filtroPessoa) this.filtrosAtivos.pessoa = filtroPessoa.value;
+        if (filtroData) this.filtrosAtivos.data = filtroData.value;
+
+        this.atualizarListaTransacoes();
+    }
+
+    limparFiltros() {
+        this.filtrosAtivos = {
+            status: 'todos',
+            pessoa: 'todos',
+            data: ''
+        };
+
+        const filtroStatus = document.getElementById('filtroStatus');
+        const filtroPessoa = document.getElementById('filtroPessoa');
+        const filtroData = document.getElementById('filtroData');
+
+        if (filtroStatus) filtroStatus.value = 'todos';
+        if (filtroPessoa) filtroPessoa.value = 'todos';
+        if (filtroData) filtroData.value = '';
+
+        this.atualizarListaTransacoes();
+    }
+
+    // ========== NOVO MÉTODO PARA MARCAR GASTO COMO PAGO ==========
+    marcarGastoPago(gastoId) {
+        const gasto = this.gastos.find(g => g.id === gastoId);
+        if (gasto) {
+            gasto.pago = true;
+            gasto.dataPagamento = new Date().toISOString().split('T')[0];
+            this.salvarDados('gastos', this.gastos);
+            this.refreshCompleto();
+            this.mostrarToast('Gasto marcado como pago!', 'success');
+        }
+    }
+
+    // ========== MÉTODOS EXISTENTES (mantidos do código original) ==========
     configurarEventos() {
         console.log('🔧 Configurando eventos...');
         
@@ -130,6 +281,74 @@ class FinanceApp {
         }
     }
 
+    atualizarDashboard() {
+    const mesAtual = new Date().toISOString().slice(0, 7);
+
+    const ganhosMes = (this.ganhos || []).filter(g => g.data && g.data.startsWith(mesAtual))
+        .reduce((sum, g) => sum + (g.valor || 0), 0);
+
+    // GASTOS DO "EU" (apenas o que EU pago)
+    const gastosEuMes = (this.gastos || []).filter(g => 
+        g.data && g.data.startsWith(mesAtual) && g.pago && g.responsavel === 'Eu'
+    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+
+    const saldoMes = ganhosMes - gastosEuMes;
+
+    const gastosPendentes = (this.gastos || []).filter(g =>
+        g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel === 'Eu'
+    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+
+    // GASTOS PAGOS APENAS DO "EU"
+    const gastosPagados = gastosEuMes;
+
+    const pendenteReceber = (this.gastos || []).filter(g =>
+        g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel !== 'Eu'
+    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+
+    const setText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    };
+
+    // CORREÇÃO: Saldo total mostra saldo mensal, não saldo geral
+    setText('saldo', this.formatarMoeda(saldoMes));
+    setText('ganhos-mes', this.formatarMoeda(ganhosMes));
+    setText('gastos-mes', this.formatarMoeda(gastosEuMes));
+    setText('saldo-mes', this.formatarMoeda(saldoMes));
+    setText('gastos-pendentes', this.formatarMoeda(gastosPendentes));
+    setText('gastos-pagos', this.formatarMoeda(gastosPagados));
+    setText('pendente-receber', this.formatarMoeda(pendenteReceber));
+
+    // Atualiza stats rápidos
+    this.atualizarStatsRapidos();
+    }
+
+    // ========== MÉTODO PARA ATUALIZAR STATS RÁPIDOS ==========
+    atualizarStatsRapidos() {
+        const mesAtual = new Date().toISOString().slice(0, 7);
+        
+        const gastosAlimentacao = this.gastos
+            .filter(g => g.categoria === 'alimentação' && g.data.startsWith(mesAtual) && g.pago)
+            .reduce((sum, g) => sum + g.valor, 0);
+
+        const gastosTransporte = this.gastos
+            .filter(g => g.categoria === 'transporte' && g.data.startsWith(mesAtual) && g.pago)
+            .reduce((sum, g) => sum + g.valor, 0);
+
+        const aReceber = this.gastos
+            .filter(g => !g.pago && g.responsavel !== 'Eu')
+            .reduce((sum, g) => sum + g.valor, 0);
+
+        const setText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+
+        setText('stat-alimentacao', this.formatarMoeda(gastosAlimentacao));
+        setText('stat-transporte', this.formatarMoeda(gastosTransporte));
+        setText('stat-areceber', this.formatarMoeda(aReceber));
+    }
+
     mudarAba(abaId) {
         console.log('📱 Mudando para aba:', abaId);
         
@@ -163,7 +382,7 @@ class FinanceApp {
             this.atualizarListaCartoes();
             this.atualizarListaComprasCartao();
         } else if (abaId === 'transactions') {
-            this.aplicarFiltros();
+            this.atualizarListaTransacoes();
         }
     }
 
@@ -353,6 +572,52 @@ class FinanceApp {
         this.refreshCompleto();
     }
 
+    // ========== MÉTODO PARA ATUALIZAR LISTA DE PESSOAS ==========
+    atualizarListaPessoas() {
+        const container = document.getElementById('lista-pessoas');
+        if (!container) return;
+
+        if (this.pessoas.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Nenhuma pessoa cadastrada</p></div>';
+            return;
+        }
+
+        container.innerHTML = this.pessoas.map((pessoa, index) => {
+            const gastosPessoa = this.gastos.filter(g => g.responsavel === pessoa);
+            const totalPendente = gastosPessoa.filter(g => !g.pago).reduce((sum, g) => sum + g.valor, 0);
+            const totalPago = gastosPessoa.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
+
+            return `
+                <div class="person-item">
+                    <div class="person-info">
+                        <strong>👤 ${pessoa}</strong>
+                        <div class="person-stats">
+                            <div class="person-stat">
+                                <span>Pendente:</span>
+                                <strong class="pendente">${this.formatarMoeda(totalPendente)}</strong>
+                            </div>
+                            <div class="person-stat">
+                                <span>Pago:</span>
+                                <strong class="pago">${this.formatarMoeda(totalPago)}</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="person-actions">
+                        <button class="btn-icon" onclick="app.verDetalhesPessoa(${index})" title="Ver detalhes">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn-icon" onclick="app.editarPessoa(${index})" title="Editar">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-icon danger" onclick="app.excluirPessoa(${index})" title="Excluir">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
     editarPessoa(index) {
         const idElement = document.getElementById('pessoaId');
         const nomeElement = document.getElementById('nomePessoa');
@@ -459,6 +724,112 @@ class FinanceApp {
         this.refreshCompleto();
     }
 
+    // ========== MÉTODO PARA ATUALIZAR LISTA DE RECORRENTES ==========
+    atualizarListaRecorrentes() {
+        const container = document.getElementById('lista-recorrentes');
+        if (!container) return;
+
+        if (this.recorrentes.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="fas fa-sync-alt"></i><p>Nenhum gasto recorrente cadastrado</p></div>';
+            return;
+        }
+
+        // Atualiza stats dos recorrentes
+        this.atualizarStatsRecorrentes();
+
+        container.innerHTML = this.recorrentes.map(recorrente => {
+            const isParcelado = recorrente.tipo === 'parcelado';
+            const progresso = isParcelado ? `${recorrente.parcelasPagas}/${recorrente.parcelas}` : '';
+            const valorTotal = isParcelado ? (recorrente.valor * recorrente.parcelas) : recorrente.valor;
+
+            return `
+                <div class="recurring-item ${!recorrente.ativo ? 'inativo' : ''}">
+                    <div class="recurring-header">
+                        <div class="recurring-info">
+                            <strong>${recorrente.descricao}</strong>
+                            <div class="recurring-meta">
+                                ${this.formatarCategoria(recorrente.categoria)} • 
+                                ${recorrente.responsavel} • 
+                                ${isParcelado ? '📅 Parcelado' : '🔄 Fixo'}
+                                ${!recorrente.ativo ? ' • ⏸️ Inativo' : ''}
+                            </div>
+                        </div>
+                        <div class="recurring-actions-top">
+                            <button class="btn-icon small ${recorrente.ativo ? 'success' : ''}" 
+                                    onclick="app.toggleRecorrenteAtivo(${recorrente.id})" 
+                                    title="${recorrente.ativo ? 'Desativar' : 'Ativar'}">
+                                <i class="fas fa-power-off"></i>
+                            </button>
+                            <button class="btn-icon small" onclick="app.editarRecorrente(${recorrente.id})" title="Editar">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-icon small danger" onclick="app.excluirRecorrente(${recorrente.id})" title="Excluir">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="recurring-stats">
+                        <div class="recurring-stat">
+                            <span>Valor ${isParcelado ? 'da Parcela' : 'Mensal'}:</span>
+                            <strong>${this.formatarMoeda(recorrente.valor)}</strong>
+                        </div>
+                        ${isParcelado ? `
+                            <div class="recurring-stat">
+                                <span>Progresso:</span>
+                                <strong>${progresso}</strong>
+                            </div>
+                            <div class="recurring-stat">
+                                <span>Valor Total:</span>
+                                <strong>${this.formatarMoeda(valorTotal)}</strong>
+                            </div>
+                        ` : ''}
+                    </div>
+
+                    ${isParcelado && recorrente.parcelasPagas < recorrente.parcelas ? `
+                        <div class="parcela-info">
+                            <div class="progresso">
+                                <span>Próxima parcela: ${recorrente.parcelasPagas + 1}</span>
+                                <button class="btn-pagar small" onclick="app.marcarParcelaPaga(${recorrente.id})">
+                                    <i class="fas fa-check"></i> Marcar como paga
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    // ========== MÉTODO PARA ATUALIZAR STATS DOS RECORRENTES ==========
+    atualizarStatsRecorrentes() {
+        const recorrentesAtivos = this.recorrentes.filter(r => r.ativo);
+        
+        const totalMensal = recorrentesAtivos
+            .filter(r => r.tipo === 'fixo')
+            .reduce((sum, r) => sum + r.valor, 0);
+
+        const previsaoTresMeses = recorrentesAtivos
+            .reduce((sum, r) => {
+                if (r.tipo === 'fixo') {
+                    return sum + (r.valor * 3);
+                } else if (r.tipo === 'parcelado') {
+                    const parcelasRestantes = r.parcelas - r.parcelasPagas;
+                    const parcelasNosProximos3Meses = Math.min(parcelasRestantes, 3);
+                    return sum + (r.valor * parcelasNosProximos3Meses);
+                }
+                return sum;
+            }, 0);
+
+        const setText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+
+        setText('total-recorrente-mensal', this.formatarMoeda(totalMensal));
+        setText('previsao-tres-meses', this.formatarMoeda(previsaoTresMeses));
+    }
+
     // REGRA 1: Gerar transação para recorrente do "EU"
     gerarTransacaoRecorrente(recorrente) {
         const hoje = new Date();
@@ -547,6 +918,12 @@ class FinanceApp {
         this.salvarDados('gastos', this.gastos);
     }
 
+    calcularDataParcela(dataInicio, numeroParcela) {
+        const data = new Date(dataInicio);
+        data.setMonth(data.getMonth() + (numeroParcela - 1));
+        return data.toISOString().split('T')[0];
+    }
+
     editarRecorrente(recorrenteId) {
         const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
         if (recorrente) {
@@ -599,116 +976,143 @@ class FinanceApp {
 
     // ========== PAGAMENTO PARCIAL/TOTAL DE PESSOAS ==========
     marcarParcelaPaga(recorrenteId) {
-        const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
-        if (recorrente && recorrente.parcelas) {
-            if (recorrente.parcelasPagas < recorrente.parcelas) {
-                recorrente.parcelasPagas++;
-                
-                const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas);
-                
-                // REGRA 4: Se for de outra pessoa, cria ganho apenas quando marcar como pago
-                if (recorrente.responsavel !== 'Eu') {
-                    const ganhoParcela = {
-                        id: Date.now(),
-                        descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
-                        valor: recorrente.valor,
-                        data: dataParcela,
-                        tipo: 'ganho',
-                        origem: 'pagamento_pessoa',
-                        pessoaOrigem: recorrente.responsavel,
-                        timestamp: new Date().toISOString()
-                    };
-                    this.ganhos.push(ganhoParcela);
-                    this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
-                } else {
-                    const gastoParcela = {
-                        id: Date.now(),
-                        descricao: `${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
-                        valor: recorrente.valor,
-                        categoria: recorrente.categoria,
-                        responsavel: recorrente.responsavel,
-                        data: dataParcela,
-                        pago: true,
-                        dataPagamento: new Date().toISOString().split('T')[0],
-                        tipo: 'gasto',
-                        recorrenteId: recorrente.id,
-                        timestamp: new Date().toISOString()
-                    };
-                    this.gastos.push(gastoParcela);
-                    this.mostrarToast('Parcela paga!', 'success');
-                }
+    const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
+    if (recorrente && recorrente.parcelas) {
+        if (recorrente.parcelasPagas < recorrente.parcelas) {
+            recorrente.parcelasPagas++;
+            
+            const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas);
+            
+            // ATUALIZA O GASTO CORRESPONDENTE NO SISTEMA
+            const gastoCorrespondente = this.gastos.find(g => 
+                g.recorrenteId === recorrenteId && 
+                g.parcelaNumero === recorrente.parcelasPagas
+            );
+            
+            if (gastoCorrespondente) {
+                gastoCorrespondente.pago = true;
+                gastoCorrespondente.dataPagamento = new Date().toISOString().split('T')[0];
+            }
 
-                if (recorrente.parcelasPagas === recorrente.parcelas) {
-                    recorrente.ativo = false;
-                }
+            // Se for de outra pessoa, cria ganho
+            if (recorrente.responsavel !== 'Eu') {
+                const ganhoParcela = {
+                    id: Date.now(),
+                    descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
+                    valor: recorrente.valor,
+                    data: dataParcela,
+                    tipo: 'ganho',
+                    origem: 'pagamento_pessoa',
+                    pessoaOrigem: recorrente.responsavel,
+                    timestamp: new Date().toISOString()
+                };
+                this.ganhos.push(ganhoParcela);
+                this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
+            } else {
+                this.mostrarToast('Parcela paga!', 'success');
+            }
 
-                this.salvarDados('recorrentes', this.recorrentes);
-                this.salvarDados('gastos', this.gastos);
-                this.salvarDados('ganhos', this.ganhos);
-                this.refreshCompleto();
+            if (recorrente.parcelasPagas === recorrente.parcelas) {
+                recorrente.ativo = false;
+            }
+
+            this.salvarDados('recorrentes', this.recorrentes);
+            this.salvarDados('gastos', this.gastos);
+            this.salvarDados('ganhos', this.ganhos);
+            this.refreshCompleto();
             }
         }
     }
 
     // ========== PAGAMENTO PARCIAL DE GASTOS DE PESSOAS ==========
     receberPagamentoParcial(gastoId, valorPago) {
-        const gasto = this.gastos.find(g => g.id === gastoId);
-        if (gasto && gasto.responsavel !== 'Eu') {
-            const valorRestante = gasto.valor - valorPago;
-            
-            // REGRA 4: Cria ganho apenas quando marcar pagamento
-            const ganhoPagamento = {
-                id: Date.now(),
-                descricao: `Pagamento de ${gasto.responsavel} - ${gasto.descricao}`,
-                valor: valorPago,
-                data: new Date().toISOString().split('T')[0],
-                tipo: 'ganho',
-                origem: 'pagamento_pessoa',
-                pessoaOrigem: gasto.responsavel,
-                timestamp: new Date().toISOString()
-            };
-            this.ganhos.push(ganhoPagamento);
-            
-            if (valorRestante <= 0) {
-                gasto.pago = true;
-                gasto.dataPagamento = new Date().toISOString().split('T')[0];
-                this.mostrarToast(`Pagamento total recebido de ${gasto.responsavel}!`, 'success');
-            } else {
-                gasto.valor = valorRestante;
-                this.mostrarToast(`Pagamento parcial de R$ ${valorPago.toFixed(2)} recebido!`, 'info');
+    const gasto = this.gastos.find(g => g.id === gastoId);
+    if (!gasto) {
+        this.mostrarToast('Gasto não encontrado', 'error');
+        return;
+    }
+    if (gasto.responsavel === 'Eu') {
+        this.mostrarToast('Não é possível receber de "Eu"', 'error');
+        return;
+    }
+
+    valorPago = parseFloat(valorPago);
+    if (isNaN(valorPago) || valorPago <= 0) {
+        this.mostrarToast('Valor inválido', 'error');
+        return;
+    }
+
+    const hojeStr = new Date().toISOString().split('T')[0];
+    const valorRestante = parseFloat((gasto.valor - valorPago).toFixed(2));
+
+    // Gera ganho referente ao pagamento recebido
+    const ganhoPagamento = {
+        id: Date.now(),
+        descricao: `Pagamento de ${gasto.responsavel} - ${gasto.descricao}`,
+        valor: parseFloat(valorPago.toFixed(2)),
+        data: hojeStr,
+        tipo: 'ganho',
+        origem: 'pagamento_pessoa',
+        pessoaOrigem: gasto.responsavel,
+        timestamp: new Date().toISOString()
+    };
+    this.ganhos.push(ganhoPagamento);
+
+    // ATUALIZA O RECORRENTE SE EXISTIR
+    if (gasto.recorrenteId) {
+        const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
+        if (recorrente && recorrente.tipo === 'parcelado') {
+            // Encontra a parcela correspondente e marca como paga
+            const parcelaNumero = gasto.parcelaNumero;
+            if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
+                recorrente.parcelasPagas++;
+                this.mostrarToast(`Parcela ${parcelaNumero} marcada como paga no recorrente!`, 'success');
+                
+                if (recorrente.parcelasPagas === recorrente.parcelas) {
+                    recorrente.ativo = false;
+                }
+                
+                this.salvarDados('recorrentes', this.recorrentes);
             }
-            
-            this.salvarDados('gastos', this.gastos);
-            this.salvarDados('ganhos', this.ganhos);
-            this.refreshCompleto();
         }
     }
 
-    // ========== MODAL PARA PAGAMENTO PARCIAL ==========
+    if (valorRestante <= 0) {
+        // quitou totalmente
+        gasto.pago = true;
+        gasto.dataPagamento = hojeStr;
+        this.mostrarToast('Pagamento total recebido e gasto marcado como pago', 'success');
+    } else {
+        // ainda pendente: reduz o valor do gasto para o restante
+        gasto.valor = valorRestante;
+        this.mostrarToast('Pagamento parcial registrado. Restante pendente atualizado.', 'success');
+    }
+
+    this.salvarDados('gastos', this.gastos);
+    this.salvarDados('ganhos', this.ganhos);
+    this.refreshCompleto();
+    }
+
     mostrarModalPagamentoParcial(gastoId) {
         const gasto = this.gastos.find(g => g.id === gastoId);
         if (!gasto || gasto.responsavel === 'Eu') return;
         
+        // Mantém UI existente mas chama novo método receberPagamentoParcial
         const modal = document.createElement('div');
-        modal.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(0,0,0,0.5); display: flex; align-items: center; 
-            justify-content: center; z-index: 1000; padding: 20px;
-        `;
+        modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;`;
         
         modal.innerHTML = `
             <div style="background: white; padding: 20px; border-radius: 15px; max-width: 400px; width: 100%;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h3 style="margin: 0; color: #333;">Receber Pagamento</h3>
                     <button onclick="this.parentElement.parentElement.parentElement.remove()" 
-                            style="background: none; border: none; font-size: 1.5em; cursor: pointer; color: #666;">
-                        ✕
-                    </button>
+                            style="background: none; border: none; font-size: 1.5em; cursor: pointer; color: #666;">✕</button>
                 </div>
                 <div style="margin-bottom: 20px;">
                     <p><strong>De:</strong> ${gasto.responsavel}</p>
                     <p><strong>Descrição:</strong> ${gasto.descricao}</p>
-                    <p><strong>Valor Total:</strong> ${this.formatarMoeda(gasto.valor)}</p>
+                    <p><strong>Valor Pend.:</strong> ${this.formatarMoeda(gasto.valor)}</p>
                 </div>
                 <div style="margin-bottom: 20px;">
                     <label style="display: block; margin-bottom: 8px; font-weight: 600;">Valor Recebido (R$)</label>
@@ -722,7 +1126,7 @@ class FinanceApp {
                             style="flex: 1; padding: 12px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer;">
                         Cancelar
                     </button>
-                    <button onclick="app.receberPagamentoParcial(${gastoId}, parseFloat(document.getElementById('valorPagamentoParcial').value)); this.parentElement.parentElement.parentElement.remove()" 
+                    <button id="confirmRecebimento" 
                             style="flex: 1; padding: 12px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer;">
                         Confirmar Recebimento
                     </button>
@@ -731,530 +1135,15 @@ class FinanceApp {
         `;
         
         document.body.appendChild(modal);
-    }
 
-    calcularDataParcela(dataInicio, numeroParcela) {
-        const data = new Date(dataInicio);
-        data.setMonth(data.getMonth() + (numeroParcela - 1));
-        return data.toISOString().split('T')[0];
-    }
-
-    // ========== FILTROS ==========
-    aplicarFiltros() {
-        const filtroStatus = document.getElementById('filtroStatus');
-        const filtroPessoa = document.getElementById('filtroPessoa');
-        const filtroData = document.getElementById('filtroData');
-
-        this.filtrosAtivos = {
-            status: filtroStatus ? filtroStatus.value : 'todos',
-            pessoa: filtroPessoa ? filtroPessoa.value : 'todos',
-            data: filtroData ? filtroData.value : ''
-        };
-        this.atualizarListaTransacoes();
-    }
-
-    limparFiltros() {
-        const filtroStatus = document.getElementById('filtroStatus');
-        const filtroPessoa = document.getElementById('filtroPessoa');
-        const filtroData = document.getElementById('filtroData');
-
-        if (filtroStatus) filtroStatus.value = 'todos';
-        if (filtroPessoa) filtroPessoa.value = 'todos';
-        if (filtroData) filtroData.value = '';
-        
-        this.filtrosAtivos = { status: 'todos', pessoa: 'todos', data: '' };
-        this.atualizarListaTransacoes();
-    }
-
-    // ========== PAGAMENTOS ==========
-    marcarComoPago(gastoId) {
-        const gasto = this.gastos.find(g => g.id === gastoId);
-        if (gasto) {
-            // REGRA 1 e 4: Só marca como pago quando clicar
-            if (gasto.responsavel !== 'Eu') {
-                this.mostrarModalPagamentoParcial(gastoId);
-                return;
-            }
-            
-            gasto.pago = true;
-            gasto.dataPagamento = new Date().toISOString().split('T')[0];
-            this.mostrarToast('Gasto pago!', 'success');
-            
-            this.salvarDados('gastos', this.gastos);
-            this.refreshCompleto();
-        }
-    }
-
-    // ========== ATUALIZAÇÕES DE INTERFACE ==========
-    atualizarDashboard() {
-        const mesAtual = new Date().toISOString().slice(0, 7);
-        
-        // REGRA 1: Só conta gastos pagos no mês
-        const gastosMes = this.gastos
-            .filter(g => g.data.startsWith(mesAtual) && g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const ganhosMes = this.ganhos
-            .filter(g => g.data.startsWith(mesAtual))
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const saldoMes = ganhosMes - gastosMes;
-        const saldoTotal = this.calcularSaldoTotal();
-
-        // REGRA 6: Pendentes a pagar (meus gastos não pagos)
-        const gastosPendentes = this.gastos
-            .filter(g => !g.pago && g.responsavel === 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const gastosPagados = this.gastos
-            .filter(g => g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        // REGRA 3: A receber (gastos de outras pessoas não pagos)
-        const pendenteReceber = this.gastos
-            .filter(g => !g.pago && g.responsavel !== 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        // Atualizar elementos
-        this.atualizarElementoTexto('ganhos-mes', this.formatarMoeda(ganhosMes));
-        this.atualizarElementoTexto('gastos-mes', this.formatarMoeda(gastosMes));
-        this.atualizarElementoTexto('saldo-mes', this.formatarMoeda(saldoMes));
-        this.atualizarElementoTexto('saldo', this.formatarMoeda(saldoTotal));
-        this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(gastosPendentes));
-        this.atualizarElementoTexto('gastos-pagos', this.formatarMoeda(gastosPagados));
-        this.atualizarElementoTexto('pendente-receber', this.formatarMoeda(pendenteReceber));
-
-        this.atualizarAlertas(ganhosMes, gastosMes, gastosPendentes, pendenteReceber);
-        this.atualizarStatsRapidos();
-        this.atualizarPrevisaoPessoas(); // REGRA 7
-    }
-
-    atualizarElementoTexto(id, texto) {
-        const elemento = document.getElementById(id);
-        if (elemento) {
-            elemento.textContent = texto;
-        }
-    }
-
-    atualizarAlertas(ganhosMes, gastosMes, gastosPendentes, pendenteReceber) {
-        const alertasContainer = document.getElementById('alertas');
-        if (!alertasContainer) return;
-
-        let alertasHTML = '';
-
-        if (this.gastos.length === 0 && this.ganhos.length === 0) {
-            alertasHTML = '<div class="alerta info"><i class="fas fa-info-circle"></i><span>Bem-vindo! Adicione seus primeiros gastos e ganhos.</span></div>';
-        } else {
-            if (ganhosMes > 0) {
-                const proporcao = (gastosMes / ganhosMes) * 100;
-                if (proporcao > 90) {
-                    alertasHTML += `<div class="alerta danger"><i class="fas fa-exclamation-triangle"></i><span>🚨 Gastando ${proporcao.toFixed(1)}% dos ganhos!</span></div>`;
-                } else if (proporcao > 70) {
-                    alertasHTML += `<div class="alerta warning"><i class="fas fa-exclamation-circle"></i><span>⚠️ Cuidado! ${proporcao.toFixed(1)}% dos ganhos</span></div>`;
-                }
-            }
-
-            if (pendenteReceber > 0) {
-                alertasHTML += `<div class="alerta info"><i class="fas fa-hand-holding-usd"></i><span>💰 R$ ${pendenteReceber.toFixed(2)} a receber</span></div>`;
-            }
-
-            if (gastosPendentes > 0) {
-                alertasHTML += `<div class="alerta warning"><i class="fas fa-clock"></i><span>⏰ R$ ${gastosPendentes.toFixed(2)} em gastos pendentes</span></div>`;
-            }
-
-            const recorrentesAtivos = this.recorrentes.filter(r => r.ativo && r.responsavel === 'Eu');
-            if (recorrentesAtivos.length > 0) {
-                const totalRecorrente = recorrentesAtivos.reduce((sum, r) => sum + r.valor, 0);
-                alertasHTML += `<div class="alerta info"><i class="fas fa-sync-alt"></i><span>🔄 R$ ${totalRecorrente.toFixed(2)} em recorrentes</span></div>`;
-            }
-
-            if (!alertasHTML) {
-                alertasHTML = '<div class="alerta success"><i class="fas fa-check-circle"></i><span>✅ Finanças sob controle!</span></div>';
-            }
-        }
-
-        alertasContainer.innerHTML = alertasHTML;
-    }
-
-    atualizarStatsRapidos() {
-        const alimentacao = this.gastos
-            .filter(g => g.categoria === 'alimentação' && g.responsavel === 'Eu' && g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-        
-        const transporte = this.gastos
-            .filter(g => g.categoria === 'transporte' && g.responsavel === 'Eu' && g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-        
-        const aReceber = this.gastos
-            .filter(g => !g.pago && g.responsavel !== 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        this.atualizarElementoTexto('stat-alimentacao', this.formatarMoeda(alimentacao));
-        this.atualizarElementoTexto('stat-transporte', this.formatarMoeda(transporte));
-        this.atualizarElementoTexto('stat-areceber', this.formatarMoeda(aReceber));
-    }
-
-    // REGRA 7: Atualizar previsão para pessoas
-    atualizarPrevisaoPessoas() {
-        this.pessoas.forEach(pessoa => {
-            if (pessoa !== 'Eu') {
-                this.calcularPrevisaoPessoa(pessoa);
-            }
+        document.getElementById('confirmRecebimento').addEventListener('click', () => {
+            const valor = parseFloat(document.getElementById('valorPagamentoParcial').value);
+            this.receberPagamentoParcial(gastoId, valor);
+            modal.remove();
         });
     }
 
-    calcularPrevisaoPessoa(pessoa) {
-        const hoje = new Date();
-        const mesAtual = hoje.getMonth();
-        const anoAtual = hoje.getFullYear();
-        
-        let totalProximoMes = 0;
-        let totalMesesSeguintes = 0;
-
-        // Calcular para o próximo mês
-        const proximoMes = new Date(anoAtual, mesAtual + 1, 1);
-        const mesProximo = proximoMes.getMonth();
-        const anoProximo = proximoMes.getFullYear();
-
-        // Gastos recorrentes da pessoa
-        const recorrentesPessoa = this.recorrentes.filter(r => 
-            r.responsavel === pessoa && r.ativo
-        );
-
-        recorrentesPessoa.forEach(recorrente => {
-            if (recorrente.tipo === 'parcelado') {
-                // Calcular parcelas futuras
-                const parcelasRestantes = recorrente.parcelas - recorrente.parcelasPagas;
-                for (let i = 1; i <= parcelasRestantes; i++) {
-                    const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas + i);
-                    const dataParcelaObj = new Date(dataParcela);
-                    
-                    if (dataParcelaObj.getMonth() === mesProximo && dataParcelaObj.getFullYear() === anoProximo) {
-                        totalProximoMes += recorrente.valor;
-                    } else if (dataParcelaObj > proximoMes) {
-                        totalMesesSeguintes += recorrente.valor;
-                    }
-                }
-            } else {
-                // Recorrente fixo - sempre conta para o próximo mês
-                totalProximoMes += recorrente.valor;
-            }
-        });
-
-        // Atualizar interface se necessário
-        console.log(`Previsão para ${pessoa}: Próximo mês R$ ${totalProximoMes}, Seguintes R$ ${totalMesesSeguintes}`);
-    }
-
-    // ========== ATUALIZAR LISTA RECORRENTES ==========
-    atualizarListaRecorrentes() {
-        const container = document.getElementById('lista-recorrentes');
-        if (!container) return;
-        
-        if (this.recorrentes.length === 0) {
-            container.innerHTML = '<div class="empty-state"><i class="fas fa-sync-alt"></i><p>Nenhum recorrente</p></div>';
-            return;
-        }
-
-        container.innerHTML = this.recorrentes.map(recorrente => {
-            const isParcelado = recorrente.tipo === 'parcelado';
-            const progresso = isParcelado ? `${recorrente.parcelasPagas}/${recorrente.parcelas}` : 'Fixo';
-            const porcentagem = isParcelado ? Math.round((recorrente.parcelasPagas / recorrente.parcelas) * 100) : 0;
-            const valorPago = isParcelado ? recorrente.parcelasPagas * recorrente.valor : 0;
-            const valorTotal = isParcelado ? recorrente.parcelas * recorrente.valor : recorrente.valor;
-            
-            const statusIcon = recorrente.ativo ? '🔵' : '⚪';
-            const pessoaIcon = recorrente.responsavel !== 'Eu' ? '👤' : '💼';
-
-            return `
-                <div class="recurring-item ${!recorrente.ativo ? 'inativo' : ''}">
-                    <div class="recurring-info">
-                        <div class="recurring-header">
-                            <strong>${statusIcon} ${pessoaIcon} ${recorrente.descricao}</strong>
-                            <div class="recurring-actions-top">
-                                <button class="btn-icon small ${recorrente.ativo ? 'danger' : 'success'}" 
-                                        onclick="app.toggleRecorrenteAtivo(${recorrente.id})" 
-                                        title="${recorrente.ativo ? 'Desativar' : 'Ativar'}">
-                                    <i class="fas fa-power-off"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="recurring-meta">
-                            ${this.formatarMoeda(recorrente.valor)} • ${recorrente.categoria}
-                            ${recorrente.responsavel !== 'Eu' ? ` • 👤 ${recorrente.responsavel}` : ''}
-                            • Início: ${this.formatarData(recorrente.dataInicio)}
-                        </div>
-                        ${isParcelado ? `
-                            <div class="parcela-info">
-                                <div>Parcelado: ${progresso}</div>
-                                <div class="progresso">
-                                    <span>${porcentagem}%</span>
-                                    <span>${this.formatarMoeda(valorPago)} / ${this.formatarMoeda(valorTotal)}</span>
-                                </div>
-                            </div>
-                        ` : ''}
-                    </div>
-                    <div class="recurring-actions">
-                        ${isParcelado && recorrente.ativo && recorrente.parcelasPagas < recorrente.parcelas ? `
-                            <button class="btn-pagar" onclick="app.marcarParcelaPaga(${recorrente.id})" title="Marcar parcela como paga">
-                                <i class="fas fa-check"></i>
-                            </button>
-                        ` : ''}
-                        <button class="btn-icon" onclick="app.editarRecorrente(${recorrente.id})" title="Editar">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-icon danger" onclick="app.excluirRecorrente(${recorrente.id})" title="Excluir">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
-
-    atualizarListaTransacoes() {
-        const container = document.getElementById('lista-transacoes');
-        if (!container) return;
-
-        let transacoesFiltradas = [...this.gastos, ...this.ganhos];
-
-        // Aplicar filtros
-        if (this.filtrosAtivos.status !== 'todos') {
-            transacoesFiltradas = transacoesFiltradas.filter(t => {
-                if (t.tipo === 'ganho') return true;
-                return this.filtrosAtivos.status === 'pendente' ? !t.pago : t.pago;
-            });
-        }
-
-        if (this.filtrosAtivos.pessoa !== 'todos') {
-            transacoesFiltradas = transacoesFiltradas.filter(t => {
-                if (t.tipo === 'ganho') return true;
-                return t.responsavel === this.filtrosAtivos.pessoa;
-            });
-        }
-
-        if (this.filtrosAtivos.data) {
-            transacoesFiltradas = transacoesFiltradas.filter(t => t.data.startsWith(this.filtrosAtivos.data));
-        }
-
-        transacoesFiltradas = transacoesFiltradas
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-            .slice(0, 50);
-
-        if (transacoesFiltradas.length === 0) {
-            container.innerHTML = '<div class="empty-state"><i class="fas fa-receipt"></i><p>Nenhuma transação</p></div>';
-            return;
-        }
-
-        container.innerHTML = transacoesFiltradas.map(trans => {
-            const isGasto = trans.tipo === 'gasto';
-            const isPago = trans.pago;
-            const isDeTerceiro = trans.responsavel && trans.responsavel !== 'Eu';
-            const isRecorrente = trans.recorrenteId;
-            const isCartao = trans.cartaoId;
-            
-            let statusBadge = '';
-            if (isGasto) {
-                statusBadge = isPago ? 
-                    '<span class="status-badge pago">PAGO</span>' : 
-                    '<span class="status-badge pendente">PENDENTE</span>';
-            }
-
-            let pessoaBadge = '';
-            if (isDeTerceiro) {
-                pessoaBadge = '<span class="status-badge info">PESSOA</span>';
-            }
-
-            let recorrenteBadge = '';
-            if (isRecorrente) {
-                recorrenteBadge = '<span class="status-badge warning">RECORRENTE</span>';
-            }
-
-            let cartaoBadge = '';
-            if (isCartao) {
-                cartaoBadge = '<span class="status-badge info">CARTÃO</span>';
-            }
-
-            return `
-                <div class="transaction-item ${isGasto && !isPago ? 'pendente' : ''}">
-                    <div class="transaction-info">
-                        <div class="transaction-header">
-                            <strong>${trans.descricao}</strong>
-                            <div>
-                                ${statusBadge}
-                                ${pessoaBadge}
-                                ${recorrenteBadge}
-                                ${cartaoBadge}
-                            </div>
-                        </div>
-                        <div class="transaction-meta">
-                            ${this.formatarData(trans.data)}
-                            ${trans.categoria ? ` • ${this.formatarCategoria(trans.categoria)}` : ''}
-                            ${isDeTerceiro ? ` • 👤 ${trans.responsavel}` : ''}
-                            ${trans.pago ? ` • ✅ Pago em ${this.formatarData(trans.dataPagamento)}` : ''}
-                        </div>
-                    </div>
-                    <div class="transaction-actions">
-                        <div class="transaction-value ${trans.tipo}">
-                            ${trans.tipo === 'ganho' ? '+' : '-'} ${this.formatarMoeda(trans.valor)}
-                        </div>
-                        <div class="action-buttons-small">
-                            ${isGasto && !isPago ? `
-                                <button class="btn-pagar" onclick="app.marcarComoPago(${trans.id})" title="Marcar como pago">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                            ` : ''}
-                            <button class="btn-icon small" onclick="app.${isGasto ? 'editarGasto' : 'editarGanho'}(${trans.id})" title="Editar">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn-icon small danger" onclick="app.${isGasto ? 'excluirGasto' : 'excluirGanho'}(${trans.id})" title="Excluir">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
-
-    // ========== ATUALIZAR LISTA PESSOAS ==========
-    atualizarListaPessoas() {
-        const container = document.getElementById('lista-pessoas');
-        if (!container) return;
-        
-        if (this.pessoas.length === 0) {
-            container.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Nenhuma pessoa cadastrada</p></div>';
-            return;
-        }
-
-        container.innerHTML = this.pessoas.map((pessoa, index) => {
-            if (pessoa === 'Eu') return ''; // Não mostra "Eu" na lista
-            
-            const gastosPessoa = this.gastos.filter(g => g.responsavel === pessoa);
-            const totalDevendo = gastosPessoa.filter(g => !g.pago).reduce((sum, g) => sum + g.valor, 0);
-            const totalPago = gastosPessoa.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
-            
-            // REGRA 3: SOMA CONSOLIDADA POR MÊS - MELHORADA
-            const previsaoMensal = this.calcularPrevisaoMensalPessoa(pessoa);
-            
-            return `
-                <div class="person-item">
-                    <div class="person-info">
-                        <strong>👤 ${pessoa}</strong>
-                        <div class="person-stats">
-                            <div class="person-stat">
-                                <span class="stat-label">Total a Receber:</span>
-                                <span class="stat-value pendente">${this.formatarMoeda(totalDevendo)}</span>
-                            </div>
-                            <div class="person-stat">
-                                <span class="stat-label">Já Recebido:</span>
-                                <span class="stat-value pago">${this.formatarMoeda(totalPago)}</span>
-                            </div>
-                        </div>
-                        
-                        <!-- VISÃO CONSOLIDADA POR MÊS - NOVA SEÇÃO -->
-                        <div class="previsao-mensal">
-                            <h4>📅 Previsão por Mês</h4>
-                            ${previsaoMensal.map(previsao => `
-                                <div class="previsao-mes-item">
-                                    <span class="mes-label">${previsao.mes}:</span>
-                                    <span class="mes-valor">${this.formatarMoeda(previsao.total)}</span>
-                                    ${previsao.parcelas > 0 ? `<small>(${previsao.parcelas} parcela(s))</small>` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                    <div class="person-actions">
-                        <button class="btn-icon" onclick="app.verDetalhesCompletosPessoa('${pessoa}')" title="Ver detalhes completos">
-                            <i class="fas fa-chart-bar"></i>
-                        </button>
-                        <button class="btn-icon" onclick="app.verDetalhesPessoa(${index})" title="Ver gastos">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                        <button class="btn-icon" onclick="app.editarPessoa(${index})" title="Editar">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-icon danger" onclick="app.excluirPessoa(${index})" title="Excluir">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-    }
-
-    // NOVO MÉTODO: Cálculo detalhado por mês
-    calcularPrevisaoMensalPessoa(pessoa) {
-        const hoje = new Date();
-        const previsoes = [];
-        
-        // Calcula para os próximos 6 meses
-        for (let i = 0; i < 6; i++) {
-            const mesData = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
-            const mes = mesData.getMonth();
-            const ano = mesData.getFullYear();
-            
-            // Gastos diretos da pessoa
-            const gastosMes = this.gastos.filter(g => 
-                g.responsavel === pessoa && 
-                !g.pago
-            ).filter(gasto => {
-                const dataGasto = new Date(gasto.data);
-                return dataGasto.getMonth() === mes && dataGasto.getFullYear() === ano;
-            });
-
-            const totalGastos = gastosMes.reduce((sum, gasto) => sum + gasto.valor, 0);
-            const parcelasGastos = gastosMes.length;
-            
-            // Recorrentes da pessoa
-            const recorrentesMes = this.recorrentes.filter(r => 
-                r.responsavel === pessoa && 
-                r.ativo
-            ).filter(recorrente => {
-                if (recorrente.tipo === 'parcelado') {
-                    const parcelasRestantes = recorrente.parcelas - recorrente.parcelasPagas;
-                    for (let p = 1; p <= parcelasRestantes; p++) {
-                        const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas + p);
-                        const dataParcelaObj = new Date(dataParcela);
-                        if (dataParcelaObj.getMonth() === mes && dataParcelaObj.getFullYear() === ano) {
-                            return true;
-                        }
-                    }
-                    return false;
-                } else {
-                    // Recorrente fixo - sempre conta
-                    return true;
-                }
-            });
-
-            const totalRecorrentes = recorrentesMes.reduce((sum, r) => sum + r.valor, 0);
-            const parcelasRecorrentes = recorrentesMes.reduce((sum, r) => {
-                if (r.tipo === 'parcelado') {
-                    return sum + (r.parcelas - r.parcelasPagas);
-                }
-                return sum + 1;
-            }, 0);
-
-            const totalMes = totalGastos + totalRecorrentes;
-            const totalParcelas = parcelasGastos + parcelasRecorrentes;
-            
-            if (totalMes > 0) {
-                const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-                previsoes.push({
-                    mes: `${meses[mes]}/${ano.toString().slice(2)}`,
-                    total: totalMes,
-                    parcelas: totalParcelas,
-                    detalhes: {
-                        gastos: totalGastos,
-                        recorrentes: totalRecorrentes
-                    }
-                });
-            }
-        }
-        
-        return previsoes;
-    }
-
-    // NOVO MÉTODO: Detalhes completos da pessoa
+    // ========== DETALHES PESSOA (corrigido: Previsão Mensal Detalhada) ==========
     verDetalhesCompletosPessoa(nomePessoa) {
         const gastosPessoa = this.gastos.filter(g => g.responsavel === nomePessoa);
         const previsaoMensal = this.calcularPrevisaoMensalPessoa(nomePessoa);
@@ -1298,15 +1187,21 @@ class FinanceApp {
                         </div>
         `;
         
+        // Mostra cada previsão com descrições no campo "Detalhes" e botão para receber o total do mês
         previsaoMensal.forEach(previsao => {
+            const detalheTexto = previsao.detalhes.descricoes.length > 0 ? previsao.detalhes.descricoes.join('<br>') : '-';
             detalhesHTML += `
                 <div class="tabela-row">
                     <span class="mes">${previsao.mes}</span>
                     <span class="valor">${this.formatarMoeda(previsao.total)}</span>
                     <span class="parcelas">${previsao.parcelas}</span>
                     <span class="detalhes">
-                        Gastos: ${this.formatarMoeda(previsao.detalhes.gastos)} | 
-                        Recorrentes: ${this.formatarMoeda(previsao.detalhes.recorrentes)}
+                        ${detalheTexto}
+                        <div style="margin-top:8px;">
+                            <button class="btn-primary" onclick="app.receberTotalMesPessoa('${nomePessoa}', '${previsao.mesISO}')">
+                                Receber total deste mês
+                            </button>
+                        </div>
                     </span>
                 </div>
             `;
@@ -1442,6 +1337,108 @@ class FinanceApp {
         `;
         
         this.mostrarModalDetalhes(detalhesHTML);
+    }
+
+    // ========== MÉTODO PARA CALCULAR PREVISÃO MENSAL PESSOA ==========
+    calcularPrevisaoMensalPessoa(nomePessoa) {
+        const gastosPendentes = this.gastos.filter(g => 
+            g.responsavel === nomePessoa && !g.pago
+        );
+
+        const previsaoPorMes = {};
+
+        gastosPendentes.forEach(gasto => {
+            const mes = gasto.data.substring(0, 7); // YYYY-MM
+            const mesFormatado = this.formatarMes(mes);
+
+            if (!previsaoPorMes[mes]) {
+                previsaoPorMes[mes] = {
+                    total: 0,
+                    parcelas: 0,
+                    detalhes: {
+                        descricoes: []
+                    }
+                };
+            }
+
+            previsaoPorMes[mes].total += gasto.valor;
+            previsaoPorMes[mes].parcelas++;
+            
+            // Adiciona descrição resumida
+            const descricaoResumida = gasto.descricao.length > 30 ? 
+                gasto.descricao.substring(0, 30) + '...' : gasto.descricao;
+            previsaoPorMes[mes].detalhes.descricoes.push(
+                `${this.formatarMoeda(gasto.valor)} - ${descricaoResumida}`
+            );
+        });
+
+        // Converte para array e ordena por mês
+        return Object.entries(previsaoPorMes)
+            .map(([mesISO, dados]) => ({
+                mesISO,
+                mes: this.formatarMes(mesISO),
+                total: dados.total,
+                parcelas: dados.parcelas,
+                detalhes: dados.detalhes
+            }))
+            .sort((a, b) => a.mesISO.localeCompare(b.mesISO));
+    }
+
+    // ========== MÉTODO PARA RECEBER TOTAL DO MÊS ==========
+    receberTotalMesPessoa(nomePessoa, mesISO) {
+    const gastosPendentes = this.gastos.filter(g => 
+        g.responsavel === nomePessoa && 
+        !g.pago && 
+        g.data.startsWith(mesISO)
+    );
+
+    if (gastosPendentes.length === 0) {
+        this.mostrarToast('Nenhum gasto pendente para este mês', 'warning');
+        return;
+    }
+
+    const total = gastosPendentes.reduce((sum, g) => sum + g.valor, 0);
+    const hojeStr = new Date().toISOString().split('T')[0];
+
+    // Gera ganho referente ao pagamento total do mês
+    const ganhoTotal = {
+        id: Date.now(),
+        descricao: `Pagamento total de ${nomePessoa} - ${this.formatarMes(mesISO)}`,
+        valor: total,
+        data: hojeStr,
+        tipo: 'ganho',
+        origem: 'pagamento_pessoa',
+        pessoaOrigem: nomePessoa,
+        timestamp: new Date().toISOString()
+    };
+    this.ganhos.push(ganhoTotal);
+
+    // ATUALIZA RECORRENTES
+    gastosPendentes.forEach(gasto => {
+        gasto.pago = true;
+        gasto.dataPagamento = hojeStr;
+        
+        // Atualiza o recorrente se existir
+        if (gasto.recorrenteId) {
+            const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
+            if (recorrente && recorrente.tipo === 'parcelado') {
+                const parcelaNumero = gasto.parcelaNumero;
+                if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
+                    recorrente.parcelasPagas++;
+                    
+                    if (recorrente.parcelasPagas === recorrente.parcelas) {
+                        recorrente.ativo = false;
+                    }
+                }
+            }
+        }
+    });
+
+    this.salvarDados('ganhos', this.ganhos);
+    this.salvarDados('gastos', this.gastos);
+    this.salvarDados('recorrentes', this.recorrentes);
+    this.refreshCompleto();
+    this.mostrarToast(`Pagamento total de ${this.formatarMes(mesISO)} recebido de ${nomePessoa}!`, 'success');
     }
 
     mostrarModalDetalhes(conteudo) {
@@ -1805,15 +1802,19 @@ class FinanceApp {
             const total = gastosMes.reduce((sum, gasto) => sum + gasto.valor, 0);
             
             if (total > 0) {
-                const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
                 previsoes.push({
-                    mes: `${meses[mes]}/${ano.toString().slice(2)}`,
+                    mes: `${this.formatarMesNome(mes)}/${ano.toString().slice(2)}`,
                     valor: total
                 });
             }
         }
         
         return previsoes;
+    }
+
+    formatarMesNome(mes) {
+        const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        return meses[mes];
     }
 
     atualizarStatsCartoes() {
@@ -1826,6 +1827,13 @@ class FinanceApp {
         this.atualizarElementoTexto('fatura-atual', this.formatarMoeda(faturaAtualTotal));
         this.atualizarElementoTexto('fatura-proxima', this.formatarMoeda(faturaProximaTotal));
         this.atualizarElementoTexto('limite-disponivel', this.formatarMoeda(limiteDisponivelTotal));
+    }
+
+    atualizarElementoTexto(id, texto) {
+        const elemento = document.getElementById(id);
+        if (elemento) {
+            elemento.textContent = texto;
+        }
     }
 
     atualizarListaComprasCartao() {
@@ -2199,6 +2207,9 @@ class FinanceApp {
         }
     }
 }
+
+// Variável global para meses (necessária para algumas funções)
+const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 // Funções globais
 function mostrarModal(tipo) {
