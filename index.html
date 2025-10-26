@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Controle Financeiro</title>
+    <meta name="description" content="Controle suas finanças pessoais de forma simples e eficiente">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>💰 Meu Dinheiro</h1>
+                <button class="btn-icon" id="btnConfig">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+            <div class="saldo-total">
+                <span id="saldo">R$ 0,00</span>
+            </div>
+        </header>
+
+        <!-- Menu de Navegação -->
+        <nav class="nav">
+            <button class="nav-btn active" data-tab="dashboard">
+                <i class="fas fa-home"></i>
+                <span>Início</span>
+            </button>
+            <button class="nav-btn" data-tab="transactions">
+                <i class="fas fa-exchange-alt"></i>
+                <span>Transações</span>
+            </button>
+            <button class="nav-btn" data-tab="recurring">
+                <i class="fas fa-sync-alt"></i>
+                <span>Recorrentes</span>
+            </button>
+            <button class="nav-btn" data-tab="cards">
+                <i class="fas fa-credit-card"></i>
+                <span>Cartões</span>
+            </button>
+            <button class="nav-btn" data-tab="reports">
+                <i class="fas fa-chart-bar"></i>
+                <span>Relatórios</span>
+            </button>
+            <button class="nav-btn" data-tab="people">
+                <i class="fas fa-users"></i>
+                <span>Pessoas</span>
+            </button>
+        </nav>
+
+        <!-- Conteúdo Principal -->
+        <main class="main-content">
+            <!-- Dashboard -->
+            <div id="dashboard" class="tab-content active">
+                <div class="alertas-container" id="alertas">
+                    <div class="alerta info">
+                        <i class="fas fa-info-circle"></i>
+                        <span>Bem-vindo! Adicione seus primeiros gastos e ganhos.</span>
+                    </div>
+                </div>
+                
+                <div class="cards-grid">
+                    <div class="card ganhos">
+                        <i class="fas fa-arrow-up"></i>
+                        <h3>Ganhos</h3>
+                        <span id="ganhos-mes">R$ 0,00</span>
+                        <small>Este mês</small>
+                    </div>
+                    <div class="card gastos">
+                        <i class="fas fa-arrow-down"></i>
+                        <h3>Gastos</h3>
+                        <span id="gastos-mes">R$ 0,00</span>
+                        <small>Este mês</small>
+                    </div>
+                    <div class="card saldo">
+                        <i class="fas fa-wallet"></i>
+                        <h3>Saldo</h3>
+                        <span id="saldo-mes">R$ 0,00</span>
+                        <small>Este mês</small>
+                    </div>
+                    <div class="card pendentes">
+                        <i class="fas fa-clock"></i>
+                        <h3>Pendentes</h3>
+                        <span id="gastos-pendentes">R$ 0,00</span>
+                        <small>A pagar</small>
+                    </div>
+                    <div class="card pendentes-receber">
+                        <i class="fas fa-hand-holding-usd"></i>
+                        <h3>A Receber</h3>
+                        <span id="pendente-receber">R$ 0,00</span>
+                        <small>De outras pessoas</small>
+                    </div>
+                    <div class="card pagos">
+                        <i class="fas fa-check"></i>
+                        <h3>Pagamentos</h3>
+                        <span id="gastos-pagos">R$ 0,00</span>
+                        <small>Já pagos</small>
+                    </div>
+                </div>
+
+                <div class="action-buttons">
+                    <button class="btn-primary" onclick="mostrarModal('gasto')">
+                        <i class="fas fa-minus-circle"></i>
+                        Adicionar Gasto
+                    </button>
+                    <button class="btn-secondary" onclick="mostrarModal('ganho')">
+                        <i class="fas fa-plus-circle"></i>
+                        Adicionar Ganho
+                    </button>
+                </div>
+
+                <div class="quick-stats">
+                    <h3>Resumo Rápido</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Gastos com Alimentação</span>
+                            <span class="stat-value" id="stat-alimentacao">R$ 0,00</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Gastos com Transporte</span>
+                            <span class="stat-value" id="stat-transporte">R$ 0,00</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Valores a Receber</span>
+                            <span class="stat-value" id="stat-areceber">R$ 0,00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transações -->
+            <div id="transactions" class="tab-content">
+                <div class="section-header">
+                    <h2>Últimas Transações</h2>
+                    <div class="filter-actions">
+                        <select id="filtroStatus" class="filter-select">
+                            <option value="todos">Todos</option>
+                            <option value="pendente">Pendentes</option>
+                            <option value="pago">Pagos</option>
+                        </select>
+                        <select id="filtroPessoa" class="filter-select">
+                            <option value="todos">Todas as pessoas</option>
+                        </select>
+                        <input type="month" id="filtroData" class="filter-date">
+                        <button class="btn-icon" onclick="app.aplicarFiltros()" title="Aplicar filtros">
+                            <i class="fas fa-filter"></i>
+                        </button>
+                        <button class="btn-icon" onclick="app.limparFiltros()" title="Limpar filtros">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="lista-transacoes" class="transactions-list">
+                    <div class="empty-state">
+                        <i class="fas fa-receipt"></i>
+                        <p>Nenhuma transação cadastrada</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recorrentes -->
+            <div id="recurring" class="tab-content">
+                <div class="section-header">
+                    <h2>Gastos Recorrentes e Parcelados</h2>
+                    <button class="btn-primary" onclick="mostrarModal('recorrente')">
+                        <i class="fas fa-plus"></i> Novo Recorrente
+                    </button>
+                </div>
+                
+                <div class="recurring-stats">
+                    <div class="stat-card">
+                        <h4>Total Mensal</h4>
+                        <span id="total-recorrente-mensal">R$ 0,00</span>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Próximos 3 Meses</h4>
+                        <span id="previsao-tres-meses">R$ 0,00</span>
+                    </div>
+                </div>
+
+                <div id="lista-recorrentes" class="recurring-list">
+                    <div class="empty-state">
+                        <i class="fas fa-sync-alt"></i>
+                        <p>Nenhum gasto recorrente cadastrado</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Relatórios -->
+            <div id="reports" class="tab-content">
+                <div class="section-header">
+                    <h2>Relatórios e Gráficos</h2>
+                    <button class="btn-icon" onclick="atualizarGraficos()">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <h3>Ganhos vs Gastos</h3>
+                        <canvas id="graficoGastosGanhos"></canvas>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Gastos por Categoria</h3>
+                        <canvas id="graficoCategorias"></canvas>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Evolução Mensal</h3>
+                        <canvas id="graficoEvolucao"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pessoas -->
+            <div id="people" class="tab-content">
+                <div class="section-header">
+                    <h2>Controle com Pessoas</h2>
+                    <button class="btn-primary" onclick="mostrarModal('pessoa')">
+                        <i class="fas fa-user-plus"></i> Nova Pessoa
+                    </button>
+                </div>
+                
+                <div id="lista-pessoas" class="people-list">
+                    <div class="empty-state">
+                        <i class="fas fa-users"></i>
+                        <p>Nenhuma pessoa cadastrada</p>
+                    </div>
+                </div>
+            </div>
+            <!-- Cartões -->
+            <div id="cards" class="tab-content">
+                <div class="section-header">
+                    <h2>Cartões de Crédito</h2>
+                    <button class="btn-primary" onclick="mostrarModal('cartao')">
+                        <i class="fas fa-credit-card"></i> Novo Cartão
+                    </button>
+                </div>
+                
+                <div class="cards-stats">
+                    <div class="stat-card">
+                        <h4>Fatura Atual</h4>
+                        <span id="fatura-atual">R$ 0,00</span>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Próxima Fatura</h4>
+                        <span id="fatura-proxima">R$ 0,00</span>
+                    </div>
+                    <div class="stat-card">
+                        <h4>Limite Disponível</h4>
+                        <span id="limite-disponivel">R$ 0,00</span>
+                    </div>
+                </div>
+
+                <div id="lista-cartoes" class="cards-list">
+                    <div class="empty-state">
+                        <i class="fas fa-credit-card"></i>
+                        <p>Nenhum cartão cadastrado</p>
+                    </div>
+                </div>
+
+                <!-- Compras do Cartão -->
+                <div class="section-header" style="margin-top: 30px;">
+                    <h3>Compras nos Cartões</h3>
+                    <button class="btn-primary" onclick="mostrarModal('compraCartao')">
+                        <i class="fas fa-shopping-cart"></i> Nova Compra
+                    </button>
+                </div>
+
+                <div id="lista-compras-cartao" class="transactions-list">
+                    <div class="empty-state">
+                        <i class="fas fa-receipt"></i>
+                        <p>Nenhuma compra no cartão</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Botão Flutuante para Adicionar -->
+        <button class="fab" onclick="mostrarModal('gasto')">
+            <i class="fas fa-plus"></i>
+        </button>
+    </div>
+
+    <!-- Modais -->
+    <div id="modalGasto" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-minus-circle"></i> Adicionar Gasto</h3>
+                <button class="btn-close" onclick="fecharModal('gasto')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formGasto" class="modal-form">
+                <input type="hidden" id="gastoId">
+                <div class="input-group">
+                    <label for="descricaoGasto">Descrição</label>
+                    <input type="text" id="descricaoGasto" placeholder="Almoço, transporte, etc..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valorGasto">Valor (R$)</label>
+                    <input type="number" id="valorGasto" placeholder="0,00" step="0.01" min="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="categoriaGasto">Categoria</label>
+                    <select id="categoriaGasto" required>
+                        <option value="">Selecione...</option>
+                        <option value="alimentação">🍕 Alimentação</option>
+                        <option value="transporte">🚗 Transporte</option>
+                        <option value="lazer">🎮 Lazer</option>
+                        <option value="saúde">🏥 Saúde</option>
+                        <option value="educação">📚 Educação</option>
+                        <option value="moradia">🏠 Moradia</option>
+                        <option value="vestuário">👕 Vestuário</option>
+                        <option value="outros">📦 Outros</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="responsavelGasto">Responsável</label>
+                    <select id="responsavelGasto" required>
+                        <option value="Eu">👤 Eu</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="dataGasto">Data</label>
+                    <input type="date" id="dataGasto" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('gasto')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modalGanho" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> Adicionar Ganho</h3>
+                <button class="btn-close" onclick="fecharModal('ganho')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formGanho" class="modal-form">
+                <input type="hidden" id="ganhoId">
+                <div class="input-group">
+                    <label for="descricaoGanho">Descrição</label>
+                    <input type="text" id="descricaoGanho" placeholder="Salário, freela, etc..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valorGanho">Valor (R$)</label>
+                    <input type="number" id="valorGanho" placeholder="0,00" step="0.01" min="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="dataGanho">Data</label>
+                    <input type="date" id="dataGanho" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('ganho')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-secondary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modalPessoa" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Cadastrar Pessoa</h3>
+                <button class="btn-close" onclick="fecharModal('pessoa')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formPessoa" class="modal-form">
+                <input type="hidden" id="pessoaId">
+                <div class="input-group">
+                    <label for="nomePessoa">Nome</label>
+                    <input type="text" id="nomePessoa" placeholder="Nome da pessoa" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('pessoa')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modalRecorrente" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-sync-alt"></i> Novo Gasto Recorrente</h3>
+                <button class="btn-close" onclick="fecharModal('recorrente')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formRecorrente" class="modal-form">
+                <input type="hidden" id="recorrenteId">
+                <div class="input-group">
+                    <label for="descricaoRecorrente">Descrição</label>
+                    <input type="text" id="descricaoRecorrente" placeholder="Aluguel, faculdade, etc..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valorRecorrente">Valor (R$)</label>
+                    <input type="number" id="valorRecorrente" placeholder="0,00" step="0.01" min="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="categoriaRecorrente">Categoria</label>
+                    <select id="categoriaRecorrente" required>
+                        <option value="moradia">🏠 Moradia</option>
+                        <option value="educação">📚 Educação</option>
+                        <option value="transporte">🚗 Transporte</option>
+                        <option value="saúde">🏥 Saúde</option>
+                        <option value="lazer">🎮 Lazer</option>
+                        <option value="outros">📦 Outros</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="tipoRecorrente">Tipo</label>
+                    <select id="tipoRecorrente" required>
+                        <option value="fixo">🔄 Fixo (mensal)</option>
+                        <option value="parcelado">📅 Parcelado</option>
+                    </select>
+                </div>
+
+                <div class="input-group" id="parcelas-group" style="display: none;">
+                    <label for="parcelasRecorrente">Número de Parcelas</label>
+                    <input type="number" id="parcelasRecorrente" placeholder="12" min="2" max="360">
+                </div>
+
+                <div class="input-group">
+                    <label for="responsavelRecorrente">Responsável</label>
+                    <select id="responsavelRecorrente" required>
+                        <option value="Eu">👤 Eu</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="dataInicioRecorrente">Data de Início</label>
+                    <input type="date" id="dataInicioRecorrente" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('recorrente')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Confirmação -->
+    <div id="modalConfirm" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-exclamation-triangle"></i> Confirmação</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage">Tem certeza que deseja excluir este item?</p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-outline" onclick="fecharModal('confirm')">
+                    Cancelar
+                </button>
+                <button type="button" class="btn-danger" id="confirmButton">
+                    <i class="fas fa-trash"></i> Excluir
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notificação Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
+
+    <!-- Modal Cartão -->
+    <div id="modalCartao" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-credit-card"></i> Cadastrar Cartão</h3>
+                <button class="btn-close" onclick="fecharModal('cartao')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formCartao" class="modal-form">
+                <input type="hidden" id="cartaoId">
+                <div class="input-group">
+                    <label for="nomeCartao">Nome do Cartão</label>
+                    <input type="text" id="nomeCartao" placeholder="Nubank, Inter, etc..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="limiteCartao">Limite Total (R$)</label>
+                    <input type="number" id="limiteCartao" placeholder="5000,00" step="0.01" min="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="diaFechamento">Dia de Fechamento</label>
+                    <input type="number" id="diaFechamento" placeholder="5" min="1" max="31" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="diaVencimento">Dia de Vencimento</label>
+                    <input type="number" id="diaVencimento" placeholder="10" min="1" max="31" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('cartao')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- Modal Compra Cartão -->
+    <div id="modalCompraCartao" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-shopping-cart"></i> Nova Compra no Cartão</h3>
+                <button class="btn-close" onclick="fecharModal('compraCartao')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="formCompraCartao" class="modal-form">
+                <input type="hidden" id="compraCartaoId">
+                
+                <div class="input-group">
+                    <label for="cartaoCompra">Cartão</label>
+                    <select id="cartaoCompra" required>
+                        <option value="">Selecione o cartão...</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="descricaoCompraCartao">Descrição</label>
+                    <input type="text" id="descricaoCompraCartao" placeholder="Supermercado, eletrônico, etc..." required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valorCompraCartao">Valor (R$)</label>
+                    <input type="number" id="valorCompraCartao" placeholder="0,00" step="0.01" min="0.01" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="categoriaCompraCartao">Categoria</label>
+                    <select id="categoriaCompraCartao" required>
+                        <option value="alimentação">🍕 Alimentação</option>
+                        <option value="transporte">🚗 Transporte</option>
+                        <option value="lazer">🎮 Lazer</option>
+                        <option value="saúde">🏥 Saúde</option>
+                        <option value="educação">📚 Educação</option>
+                        <option value="moradia">🏠 Moradia</option>
+                        <option value="vestuário">👕 Vestuário</option>
+                        <option value="outros">📦 Outros</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="parcelasCompra">Parcelas</label>
+                    <select id="parcelasCompra" required>
+                        <option value="1">À vista (1x)</option>
+                        <option value="2">2x</option>
+                        <option value="3">3x</option>
+                        <option value="4">4x</option>
+                        <option value="5">5x</option>
+                        <option value="6">6x</option>
+                        <option value="10">10x</option>
+                        <option value="12">12x</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="dataCompraCartao">Data da Compra</label>
+                    <input type="date" id="dataCompraCartao" required>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-outline" onclick="fecharModal('compraCartao')">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-save"></i> Salvar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

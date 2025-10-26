@@ -1,0 +1,22 @@
+{
+    "name": "meu-controle-financeiro",
+    "version": "3.0.0",
+    "description": "Sistema completo de controle financeiro pessoal",
+    "main": "index.html",
+    "scripts": {
+      "start": "http-server -p 8000",
+      "dev": "http-server -p 3000 -c-1"
+    },
+    "keywords": [
+      "finanças",
+      "controle",
+      "dinheiro",
+      "orcamento",
+      "pwa"
+    ],
+    "author": "Rômulo Santos",
+    "license": "MIT",
+    "devDependencies": {
+      "http-server": "^14.1.1"
+    }
+  }
