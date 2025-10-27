@@ -1,9 +1,7 @@
 class FinanceApp {
     constructor() {
         console.log('🔄 SISTEMA INICIADO - Versão 4.1 - ' + new Date().toISOString());
-        
-        // Verificar conexão
-        this.verificarConexao();
+
         
         this.gastos = this.carregarDados('gastos') || [];
         this.ganhos = this.carregarDados('ganhos') || [];
@@ -21,6 +19,8 @@ class FinanceApp {
         this.chartCategorias = null;
         this.chartEvolucao = null;
         
+        // Verificar conexão - MOVER PARA DEPOIS DA INICIALIZAÇÃO
+        this.verificarConexao();
         this.inicializarApp();
     }
 
@@ -2193,6 +2193,22 @@ class FinanceApp {
             meses.push(date.toISOString().slice(0, 7));
         }
         return meses;
+    }
+
+        // ========== VERIFICAÇÃO DE CONEXÃO ==========
+    verificarConexao() {
+        if (!navigator.onLine) {
+            this.mostrarToast('Modo offline ativado', 'info');
+        }
+
+        window.addEventListener('online', () => {
+            this.mostrarToast('Conexão restaurada', 'success');
+            this.refreshCompleto();
+        });
+
+        window.addEventListener('offline', () => {
+            this.mostrarToast('Modo offline ativado', 'warning');
+        });
     }
 
     // ========== REFRESH AUTOMÁTICO ==========
