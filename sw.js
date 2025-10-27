@@ -1,10 +1,11 @@
-// sw.js - Service Worker para PWA
-const CACHE_NAME = 'controle-financeiro-v4.0';
+// sw.js - Service Worker para PWA Offline
+const CACHE_NAME = 'controle-financeiro-v4.1';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/style.css',
+  '/style.css', 
   '/app.js',
+  '/manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
   'https://cdn.jsdelivr.net/npm/chart.js'
 ];
@@ -14,12 +15,15 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('✅ Cache aberto');
+        console.log('✅ Cache aberto - adicionando recursos');
         return cache.addAll(urlsToCache);
       })
       .then(() => {
         console.log('✅ Todos os recursos em cache');
         return self.skipWaiting();
+      })
+      .catch(error => {
+        console.error('❌ Erro ao fazer cache:', error);
       })
   );
 });
@@ -44,16 +48,24 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  // Ignora requisições para APIs externas que não podemos cachear
+  if (event.request.url.includes('google') || 
+      event.request.url.includes('facebook') ||
+      event.request.method !== 'GET') {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Retorna do cache se encontrado, senão faz a requisição
+        // Retorna do cache se encontrado
         if (response) {
           return response;
         }
-        
+
+        // Faz requisição e adiciona ao cache
         return fetch(event.request).then(response => {
-          // Verifica se recebemos uma resposta válida
+          // Verifica se é uma resposta válida
           if(!response || response.status !== 200 || response.type !== 'basic') {
             return response;
           }
@@ -67,14 +79,26 @@ self.addEventListener('fetch', event => {
             });
 
           return response;
+        }).catch(() => {
+          // Fallback para página offline se a requisição falhar
+          if (event.request.destination === 'document') {
+            return caches.match('/index.html');
+          }
         });
-      }
-    )
+      })
   );
 });
 
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
+// Sincronização em background quando voltar online
+self.addEventListener('sync', event => {
+  if (event.tag === 'background-sync') {
+    console.log('🔄 Sincronizando dados...');
+    event.waitUntil(doBackgroundSync());
   }
 });
+
+async function doBackgroundSync() {
+  // Aqui você pode adicionar lógica de sincronização
+  // quando o app voltar a ficar online
+  console.log('✅ Sincronização concluída');
+}

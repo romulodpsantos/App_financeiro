@@ -1,6 +1,9 @@
 class FinanceApp {
     constructor() {
-        console.log('🔄 SISTEMA INICIADO - Versão 4.0 - ' + new Date().toISOString());
+        console.log('🔄 SISTEMA INICIADO - Versão 4.1 - ' + new Date().toISOString());
+        
+        // Verificar conexão
+        this.verificarConexao();
         
         this.gastos = this.carregarDados('gastos') || [];
         this.ganhos = this.carregarDados('ganhos') || [];
