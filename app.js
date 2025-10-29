@@ -1,6 +1,6 @@
 class FinanceApp {
     constructor() {
-        console.log('🔄 SISTEMA INICIADO - Versão 4.1 - ' + new Date().toISOString());
+        console.log('🔄 SISTEMA INICIADO - Versão 4.3 - ' + new Date().toISOString());
 
         
         this.gastos = this.carregarDados('gastos') || [];
@@ -240,7 +240,7 @@ class FinanceApp {
             this.salvarCompraCartao();
         });
 
-        // Mostrar/ocultar campo de parcelas
+        // Mostrar/ocultar campo de parcelas para RECORRENTES
         const tipoRecorrente = document.getElementById('tipoRecorrente');
         if (tipoRecorrente) {
             tipoRecorrente.addEventListener('change', (e) => {
@@ -250,6 +250,9 @@ class FinanceApp {
                 }
             });
         }
+
+        // Configurar opções de parcelamento para COMPRAS NO CARTÃO
+        this.configurarParcelamentoCompraCartao();
 
         // Filtros
         const filtroStatus = document.getElementById('filtroStatus');
@@ -261,6 +264,26 @@ class FinanceApp {
         if (filtroData) filtroData.addEventListener('change', () => this.aplicarFiltros());
 
         console.log('✅ Eventos configurados!');
+    }
+
+    // ========== CORREÇÃO 2: Campo de Parcelamento 1x até 12x ==========
+    configurarParcelamentoCompraCartao() {
+        const selectParcelas = document.getElementById('parcelasCompra');
+        if (selectParcelas) {
+            // Limpa opções existentes
+            selectParcelas.innerHTML = '';
+            
+            // Adiciona opções de 1x até 12x
+            for (let i = 1; i <= 12; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `${i}x`;
+                selectParcelas.appendChild(option);
+            }
+            
+            // Define 1x como padrão
+            selectParcelas.value = 1;
+        }
     }
 
     configurarDataAtual() {
@@ -285,45 +308,84 @@ class FinanceApp {
     }
 
     atualizarDashboard() {
-    const mesAtual = new Date().toISOString().slice(0, 7);
+        const mesAtual = new Date().toISOString().slice(0, 7);
 
-    const ganhosMes = (this.ganhos || []).filter(g => g.data && g.data.startsWith(mesAtual))
-        .reduce((sum, g) => sum + (g.valor || 0), 0);
+        const ganhosMes = (this.ganhos || []).filter(g => g.data && g.data.startsWith(mesAtual))
+            .reduce((sum, g) => sum + (g.valor || 0), 0);
 
-    // GASTOS DO "EU" (apenas o que EU pago)
-    const gastosEuMes = (this.gastos || []).filter(g => 
-        g.data && g.data.startsWith(mesAtual) && g.pago && g.responsavel === 'Eu'
-    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+        // GASTOS DO "EU" (apenas o que EU pago)
+        const gastosEuMes = (this.gastos || []).filter(g => 
+            g.data && g.data.startsWith(mesAtual) && g.pago && g.responsavel === 'Eu'
+        ).reduce((sum, g) => sum + (g.valor || 0), 0);
 
-    const saldoMes = ganhosMes - gastosEuMes;
+        const saldoMes = ganhosMes - gastosEuMes;
 
-    const gastosPendentes = (this.gastos || []).filter(g =>
-        g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel === 'Eu'
-    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+        const gastosPendentes = (this.gastos || []).filter(g =>
+            g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel === 'Eu'
+        ).reduce((sum, g) => sum + (g.valor || 0), 0);
 
-    // GASTOS PAGOS APENAS DO "EU"
-    const gastosPagados = gastosEuMes;
+        // GASTOS PAGOS APENAS DO "EU"
+        const gastosPagados = gastosEuMes;
 
-    const pendenteReceber = (this.gastos || []).filter(g =>
-        g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel !== 'Eu'
-    ).reduce((sum, g) => sum + (g.valor || 0), 0);
+        const pendenteReceber = (this.gastos || []).filter(g =>
+            g.data && g.data.startsWith(mesAtual) && !g.pago && g.responsavel !== 'Eu'
+        ).reduce((sum, g) => sum + (g.valor || 0), 0);
 
-    const setText = (id, text) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = text;
-    };
+        const setText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
 
-    // CORREÇÃO: Saldo total mostra saldo mensal, não saldo geral
-    setText('saldo', this.formatarMoeda(saldoMes));
-    setText('ganhos-mes', this.formatarMoeda(ganhosMes));
-    setText('gastos-mes', this.formatarMoeda(gastosEuMes));
-    setText('saldo-mes', this.formatarMoeda(saldoMes));
-    setText('gastos-pendentes', this.formatarMoeda(gastosPendentes));
-    setText('gastos-pagos', this.formatarMoeda(gastosPagados));
-    setText('pendente-receber', this.formatarMoeda(pendenteReceber));
+        // CORREÇÃO: Saldo total mostra saldo mensal, não saldo geral
+        setText('saldo', this.formatarMoeda(saldoMes));
+        setText('ganhos-mes', this.formatarMoeda(ganhosMes));
+        setText('gastos-mes', this.formatarMoeda(gastosEuMes));
+        setText('saldo-mes', this.formatarMoeda(saldoMes));
+        setText('gastos-pendentes', this.formatarMoeda(gastosPendentes));
+        setText('gastos-pagos', this.formatarMoeda(gastosPagados));
+        setText('pendente-receber', this.formatarMoeda(pendenteReceber));
 
-    // Atualiza stats rápidos
-    this.atualizarStatsRapidos();
+        // ========== NOVO ALERTA: VERIFICAÇÃO DE SALDO + A RECEBER VS CONTAS PENDENTES ==========
+        this.verificarAlertaSaldo(saldoMes, pendenteReceber, gastosPendentes);
+
+        // Atualiza stats rápidos
+        this.atualizarStatsRapidos();
+    }
+
+    // ========== NOVO MÉTODO PARA VERIFICAR ALERTA DE SALDO ==========
+    verificarAlertaSaldo(saldoMes, pendenteReceber, gastosPendentes) {
+        const alertasContainer = document.getElementById('alertas');
+        if (!alertasContainer) return;
+
+        // Remove alertas anteriores
+        const alertaExistente = document.getElementById('alerta-saldo-insuficiente');
+        if (alertaExistente) {
+            alertaExistente.remove();
+        }
+
+        // Calcula o total disponível (saldo + a receber)
+        const totalDisponivel = saldoMes + pendenteReceber;
+        
+        // Verifica se o total disponível é menor que as contas pendentes
+        if (totalDisponivel < gastosPendentes && gastosPendentes > 0) {
+            const valorFaltante = gastosPendentes - totalDisponivel;
+            
+            const alertaHTML = `
+                <div id="alerta-saldo-insuficiente" class="alerta danger">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <div class="alerta-content">
+                        <strong>ATENÇÃO: Saldo Insuficiente!</strong>
+                        <span>Faltam ${this.formatarMoeda(valorFaltante)} para fechar o mês.</span>
+                        <small>Saldo (${this.formatarMoeda(saldoMes)}) + A Receber (${this.formatarMoeda(pendenteReceber)}) = ${this.formatarMoeda(totalDisponivel)} | Contas Pendentes: ${this.formatarMoeda(gastosPendentes)}</small>
+                    </div>
+                    <button class="btn-alerta-fechar" onclick="this.parentElement.remove()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            `;
+            
+            alertasContainer.insertAdjacentHTML('afterbegin', alertaHTML);
+        }
     }
 
     // ========== MÉTODO PARA ATUALIZAR STATS RÁPIDOS ==========
@@ -663,7 +725,7 @@ class FinanceApp {
         this.mostrarToast('Pessoa excluída!', 'success');
     }
 
-    // ========== CRUD RECORRENTES ==========
+    // ========== CORREÇÃO 3: Recorrentes Parcelados para Outras Pessoas em 1x ==========
     salvarRecorrente() {
         const id = document.getElementById('recorrenteId');
         const descricao = document.getElementById('descricaoRecorrente');
@@ -685,14 +747,27 @@ class FinanceApp {
         }
 
         const recorrenteValor = parseFloat(valor.value);
-        const parcelasValue = tipo.value === 'parcelado' && parcelas ? parseInt(parcelas.value) : null;
+        
+        // CORREÇÃO: Se for de outra pessoa, força tipo fixo e ignora parcelamento
+        let tipoValue = tipo.value;
+        let parcelasValue = null;
+        
+        if (responsavel.value !== 'Eu') {
+            // Para outras pessoas, sempre fixo e 1 parcela
+            tipoValue = 'fixo';
+            parcelasValue = null;
+            this.mostrarToast('Para outras pessoas, o tipo será sempre "Fixo"', 'info');
+        } else if (tipo.value === 'parcelado' && parcelas) {
+            // Para "Eu" e parcelado, usa o valor informado
+            parcelasValue = parseInt(parcelas.value);
+        }
 
         const recorrente = {
             id: id.value ? parseInt(id.value) : Date.now(),
             descricao: descricao.value,
             valor: recorrenteValor,
             categoria: categoria.value,
-            tipo: tipo.value,
+            tipo: tipoValue,
             parcelas: parcelasValue,
             parcelasPagas: id.value ? this.recorrentes.find(r => r.id === parseInt(id.value))?.parcelasPagas || 0 : 0,
             responsavel: responsavel.value,
@@ -879,10 +954,8 @@ class FinanceApp {
             this.carregarSelectPessoas();
         }
         
-        // Se for parcelado, já gera os gastos futuros
-        if (recorrente.tipo === 'parcelado' && recorrente.parcelas) {
-            this.gerarGastosParceladosPessoa(recorrente);
-        }
+        // Para outras pessoas, sempre gera um gasto fixo
+        this.gerarGastoRecorrentePessoa(recorrente);
         
         this.mostrarToast(`Dívida de ${pessoa} atualizada!`, 'info');
     }
@@ -921,6 +994,36 @@ class FinanceApp {
         this.salvarDados('gastos', this.gastos);
     }
 
+    // ========== MÉTODO PARA GERAR GASTO RECORRENTE PESSOA ==========
+    gerarGastoRecorrentePessoa(recorrente) {
+        const dataGasto = recorrente.dataInicio;
+        
+        const gastoExistente = this.gastos.find(gasto => 
+            gasto.descricao === recorrente.descricao &&
+            gasto.data === dataGasto &&
+            gasto.recorrenteId === recorrente.id
+        );
+        
+        if (!gastoExistente) {
+            const gastoMensal = {
+                id: Date.now() + Math.random(),
+                descricao: recorrente.descricao,
+                valor: recorrente.valor,
+                categoria: recorrente.categoria,
+                responsavel: recorrente.responsavel,
+                data: dataGasto,
+                pago: false,
+                dataPagamento: null,
+                tipo: 'gasto',
+                recorrenteId: recorrente.id,
+                timestamp: new Date().toISOString()
+            };
+            
+            this.gastos.push(gastoMensal);
+            this.salvarDados('gastos', this.gastos);
+        }
+    }
+
     calcularDataParcela(dataInicio, numeroParcela) {
         const data = new Date(dataInicio);
         data.setMonth(data.getMonth() + (numeroParcela - 1));
@@ -944,13 +1047,30 @@ class FinanceApp {
             if (descricaoElement) descricaoElement.value = recorrente.descricao;
             if (valorElement) valorElement.value = recorrente.valor;
             if (categoriaElement) categoriaElement.value = recorrente.categoria;
-            if (tipoElement) tipoElement.value = recorrente.tipo;
-            if (parcelasElement) parcelasElement.value = recorrente.parcelas || '';
+            
+            // CORREÇÃO: Se for de outra pessoa, força tipo fixo
+            if (tipoElement) {
+                if (recorrente.responsavel !== 'Eu') {
+                    tipoElement.value = 'fixo';
+                } else {
+                    tipoElement.value = recorrente.tipo;
+                }
+            }
+            
+            if (parcelasElement) {
+                parcelasElement.value = recorrente.parcelas || '';
+            }
+            
             if (responsavelElement) responsavelElement.value = recorrente.responsavel;
             if (dataInicioElement) dataInicioElement.value = recorrente.dataInicio;
 
             if (parcelasGroup) {
-                parcelasGroup.style.display = recorrente.tipo === 'parcelado' ? 'block' : 'none';
+                // CORREÇÃO: Se for de outra pessoa, não mostra opções de parcelamento
+                if (recorrente.responsavel !== 'Eu') {
+                    parcelasGroup.style.display = 'none';
+                } else {
+                    parcelasGroup.style.display = recorrente.tipo === 'parcelado' ? 'block' : 'none';
+                }
             }
 
             mostrarModal('recorrente');
@@ -1663,6 +1783,74 @@ class FinanceApp {
         return new Date(ano, mes, diaVencimento).toISOString().split('T')[0];
     }
 
+    // ========== CORREÇÃO 1: Fatura Atual Incluindo Compras à Vista ==========
+    calcularFaturaAtual(cartaoId) {
+        const hoje = new Date();
+        const mesAtual = hoje.getMonth();
+        const anoAtual = hoje.getFullYear();
+        
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return 0;
+
+        // Busca todas as compras do cartão (incluindo à vista)
+        const comprasCartao = this.comprasCartao.filter(c => 
+            c.cartaoId === cartaoId && 
+            c.ativa
+        );
+
+        let totalFatura = 0;
+
+        comprasCartao.forEach(compra => {
+            const dataCompra = new Date(compra.dataCompra);
+            const mesCompra = dataCompra.getMonth();
+            const anoCompra = dataCompra.getFullYear();
+
+            // VERIFICA SE A COMPRA PERTENCE À FATURA ATUAL
+            if (this.compraPertenceAFaturaAtual(cartao, compra, hoje)) {
+                if (compra.parcelas === 1) {
+                    // COMPRA À VISTA: valor total na fatura atual
+                    totalFatura += compra.valor;
+                } else {
+                    // COMPRA PARCELADA: calcula valor das parcelas da fatura atual
+                    const valorParcela = compra.valor / compra.parcelas;
+                    
+                    for (let i = 1; i <= compra.parcelas; i++) {
+                        const dataVencimentoParcela = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
+                        const dataVencimento = new Date(dataVencimentoParcela);
+                        
+                        if (dataVencimento.getMonth() === mesAtual && dataVencimento.getFullYear() === anoAtual) {
+                            totalFatura += valorParcela;
+                        }
+                    }
+                }
+            }
+        });
+
+        return totalFatura;
+    }
+
+    compraPertenceAFaturaAtual(cartao, compra, dataReferencia) {
+        const dataCompra = new Date(compra.dataCompra);
+        const diaFechamento = cartao.diaFechamento;
+        
+        // Calcula a data de fechamento do mês da compra
+        const anoCompra = dataCompra.getFullYear();
+        const mesCompra = dataCompra.getMonth();
+        
+        // Data de fechamento do mês da compra
+        const dataFechamentoCompra = new Date(anoCompra, mesCompra, diaFechamento);
+        
+        // Se a compra foi feita após o fechamento, vai para a próxima fatura
+        if (dataCompra > dataFechamentoCompra) {
+            // Próximo fechamento
+            const proximoFechamento = new Date(anoCompra, mesCompra + 1, diaFechamento);
+            return dataReferencia <= proximoFechamento;
+        } else {
+            // Fechamento atual
+            return dataReferencia <= dataFechamentoCompra;
+        }
+    }
+
     // ========== ATUALIZAR LISTAS CARTÕES ==========
     atualizarListaCartoes() {
         const container = document.getElementById('lista-cartoes');
@@ -1722,27 +1910,6 @@ class FinanceApp {
         return compras.reduce((sum, compra) => sum + compra.valor, 0);
     }
 
-    calcularFaturaAtual(cartaoId) {
-        const hoje = new Date();
-        const mesAtual = hoje.getMonth();
-        const anoAtual = hoje.getFullYear();
-        
-        const gastosCartao = this.gastos.filter(g => 
-            g.cartaoId === cartaoId && 
-            !g.pago
-        );
-
-        let total = 0;
-        gastosCartao.forEach(gasto => {
-            const dataGasto = new Date(gasto.data);
-            if (dataGasto.getMonth() === mesAtual && dataGasto.getFullYear() === anoAtual) {
-                total += gasto.valor;
-            }
-        });
-
-        return total;
-    }
-
     calcularFaturaProxima(cartaoId) {
         const hoje = new Date();
         const proximoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
@@ -1784,26 +1951,51 @@ class FinanceApp {
         return html;
     }
 
+    // ========== ATUALIZAR MÉTODO PARA CALCULAR FATURAS FUTURAS ==========
     calcularPrevisaoFaturas(cartaoId) {
         const hoje = new Date();
         const previsoes = [];
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
         
+        if (!cartao) return previsoes;
+
         // Calcula para os próximos 6 meses
         for (let i = 0; i < 6; i++) {
             const mesData = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
             const mes = mesData.getMonth();
             const ano = mesData.getFullYear();
             
-            const gastosMes = this.gastos.filter(g => 
-                g.cartaoId === cartaoId && 
-                !g.pago
-            ).filter(gasto => {
-                const dataGasto = new Date(gasto.data);
-                return dataGasto.getMonth() === mes && dataGasto.getFullYear() === ano;
+            let total = 0;
+            
+            // Calcula compras que estarão na fatura deste mês
+            const comprasCartao = this.comprasCartao.filter(c => 
+                c.cartaoId === cartaoId && 
+                c.ativa
+            );
+
+            comprasCartao.forEach(compra => {
+                const dataCompra = new Date(compra.dataCompra);
+                
+                if (compra.parcelas === 1) {
+                    // COMPRA À VISTA: verifica se pertence a esta fatura
+                    if (this.compraPertenceAFaturaEspecifica(cartao, compra, mesData)) {
+                        total += compra.valor;
+                    }
+                } else {
+                    // COMPRA PARCELADA: calcula parcelas que vencem neste mês
+                    const valorParcela = compra.valor / compra.parcelas;
+                    
+                    for (let parcela = 1; parcela <= compra.parcelas; parcela++) {
+                        const dataVencimento = this.calcularDataFaturaCartao(cartao, compra.dataCompra, parcela);
+                        const dataVenc = new Date(dataVencimento);
+                        
+                        if (dataVenc.getMonth() === mes && dataVenc.getFullYear() === ano) {
+                            total += valorParcela;
+                        }
+                    }
+                }
             });
 
-            const total = gastosMes.reduce((sum, gasto) => sum + gasto.valor, 0);
-            
             if (total > 0) {
                 previsoes.push({
                     mes: `${this.formatarMesNome(mes)}/${ano.toString().slice(2)}`,
@@ -1815,6 +2007,23 @@ class FinanceApp {
         return previsoes;
     }
 
+    compraPertenceAFaturaEspecifica(cartao, compra, dataFatura) {
+        const dataCompra = new Date(compra.dataCompra);
+        const diaFechamento = cartao.diaFechamento;
+        
+        const anoFatura = dataFatura.getFullYear();
+        const mesFatura = dataFatura.getMonth();
+        
+        // Data de fechamento da fatura específica
+        const dataFechamentoFatura = new Date(anoFatura, mesFatura, diaFechamento);
+        
+        // Data de fechamento anterior
+        const dataFechamentoAnterior = new Date(anoFatura, mesFatura - 1, diaFechamento);
+        
+        return dataCompra > dataFechamentoAnterior && dataCompra <= dataFechamentoFatura;
+    }
+
+    // ========== MÉTODO AUXILIAR PARA FORMATAR MÊS ==========
     formatarMesNome(mes) {
         const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
         return meses[mes];
@@ -2272,7 +2481,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Forçar atualização de versão
-const VERSION_ATUAL = '4.0';
+const VERSION_ATUAL = '4.3';
 if (localStorage.getItem('app_version') !== VERSION_ATUAL) {
     localStorage.setItem('app_version', VERSION_ATUAL);
     console.log('🆕 Nova versão instalada!');
