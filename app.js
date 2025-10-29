@@ -1,14 +1,482 @@
+class DatabaseService {
+    constructor() {
+        this.supabaseUrl = 'https://cdoonajltaxoxxabyokb.supabase.co';
+        this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkb29uYWpsdGF4b3h4YWJ5b2tiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3Njc0NzEsImV4cCI6MjA3NzM0MzQ3MX0.VqkYp-jx-GpPdYzNv9JsRtFl5nHSKSv9Tr_0OTGwM8I';
+        this.supabase = null;
+        this.userId = this.getUserId();
+        this.init();
+    }
+
+    init() {
+        // Carrega o cliente Supabase via CDN
+        if (typeof supabase === 'undefined') {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            script.onload = () => {
+                this.supabase = supabase.createClient(this.supabaseUrl, this.supabaseKey);
+                console.log('✅ Supabase inicializado');
+            };
+            document.head.appendChild(script);
+        } else {
+            this.supabase = supabase.createClient(this.supabaseUrl, this.supabaseKey);
+            console.log('✅ Supabase inicializado');
+        }
+    }
+
+    getUserId() {
+        let userId = localStorage.getItem('user_id');
+        if (!userId) {
+            userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('user_id', userId);
+        }
+        return userId;
+    }
+
+    // Métodos para gastos
+    async salvarGastos(gastos) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_gastos', JSON.stringify(gastos));
+            return;
+        }
+
+        try {
+            // Remove dados antigos
+            await this.supabase
+                .from('gastos')
+                .delete()
+                .eq('user_id', this.userId);
+
+            // Insere novos dados
+            const gastosComUserId = gastos.map(gasto => ({
+                id: gasto.id,
+                descricao: gasto.descricao,
+                valor: gasto.valor,
+                categoria: gasto.categoria,
+                responsavel: gasto.responsavel,
+                data: gasto.data,
+                pago: gasto.pago,
+                data_pagamento: gasto.dataPagamento,
+                tipo: gasto.tipo,
+                recorrente_id: gasto.recorrenteId,
+                parcela_numero: gasto.parcelaNumero,
+                total_parcelas: gasto.totalParcelas,
+                cartao_id: gasto.cartaoId,
+                compra_cartao_id: gasto.compraCartaoId,
+                timestamp: gasto.timestamp,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('gastos')
+                .insert(gastosComUserId);
+
+            if (error) throw error;
+            console.log('✅ Gastos salvos no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar gastos:', error);
+            localStorage.setItem('finance_gastos', JSON.stringify(gastos));
+        }
+    }
+
+    async carregarGastos() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_gastos')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('gastos')
+                .select('*')
+                .eq('user_id', this.userId)
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            if (data && data.length > 0) {
+                // Converte de volta para o formato original
+                return data.map(item => ({
+                    id: item.id,
+                    descricao: item.descricao,
+                    valor: parseFloat(item.valor),
+                    categoria: item.categoria,
+                    responsavel: item.responsavel,
+                    data: item.data,
+                    pago: item.pago,
+                    dataPagamento: item.data_pagamento,
+                    tipo: item.tipo,
+                    recorrenteId: item.recorrente_id,
+                    parcelaNumero: item.parcela_numero,
+                    totalParcelas: item.total_parcelas,
+                    cartaoId: item.cartao_id,
+                    compraCartaoId: item.compra_cartao_id,
+                    timestamp: item.timestamp
+                }));
+            }
+            return [];
+        } catch (error) {
+            console.error('Erro ao carregar gastos:', error);
+            return JSON.parse(localStorage.getItem('finance_gastos')) || [];
+        }
+    }
+
+    // Métodos para ganhos
+    async salvarGanhos(ganhos) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_ganhos', JSON.stringify(ganhos));
+            return;
+        }
+
+        try {
+            await this.supabase
+                .from('ganhos')
+                .delete()
+                .eq('user_id', this.userId);
+
+            const ganhosComUserId = ganhos.map(ganho => ({
+                id: ganho.id,
+                descricao: ganho.descricao,
+                valor: ganho.valor,
+                data: ganho.data,
+                tipo: ganho.tipo,
+                origem: ganho.origem,
+                pessoa_origem: ganho.pessoaOrigem,
+                timestamp: ganho.timestamp,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('ganhos')
+                .insert(ganhosComUserId);
+
+            if (error) throw error;
+            console.log('✅ Ganhos salvos no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar ganhos:', error);
+            localStorage.setItem('finance_ganhos', JSON.stringify(ganhos));
+        }
+    }
+
+    async carregarGanhos() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_ganhos')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('ganhos')
+                .select('*')
+                .eq('user_id', this.userId)
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            return data ? data.map(item => ({
+                id: item.id,
+                descricao: item.descricao,
+                valor: parseFloat(item.valor),
+                data: item.data,
+                tipo: item.tipo,
+                origem: item.origem,
+                pessoaOrigem: item.pessoa_origem,
+                timestamp: item.timestamp
+            })) : [];
+        } catch (error) {
+            console.error('Erro ao carregar ganhos:', error);
+            return JSON.parse(localStorage.getItem('finance_ganhos')) || [];
+        }
+    }
+
+    // Métodos para pessoas
+    async salvarPessoas(pessoas) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_pessoas', JSON.stringify(pessoas));
+            return;
+        }
+
+        try {
+            await this.supabase
+                .from('pessoas')
+                .delete()
+                .eq('user_id', this.userId);
+
+            const pessoasComUserId = pessoas.map((nome, index) => ({
+                id: index + 1,
+                nome: nome,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('pessoas')
+                .insert(pessoasComUserId);
+
+            if (error) throw error;
+            console.log('✅ Pessoas salvas no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar pessoas:', error);
+            localStorage.setItem('finance_pessoas', JSON.stringify(pessoas));
+        }
+    }
+
+    async carregarPessoas() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_pessoas')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('pessoas')
+                .select('nome')
+                .eq('user_id', this.userId)
+                .order('id', { ascending: true });
+
+            if (error) throw error;
+
+            return data ? data.map(item => item.nome) : [];
+        } catch (error) {
+            console.error('Erro ao carregar pessoas:', error);
+            return JSON.parse(localStorage.getItem('finance_pessoas')) || [];
+        }
+    }
+
+    // Métodos para recorrentes
+    async salvarRecorrentes(recorrentes) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_recorrentes', JSON.stringify(recorrentes));
+            return;
+        }
+
+        try {
+            await this.supabase
+                .from('recorrentes')
+                .delete()
+                .eq('user_id', this.userId);
+
+            const recorrentesComUserId = recorrentes.map(recorrente => ({
+                id: recorrente.id,
+                descricao: recorrente.descricao,
+                valor: recorrente.valor,
+                categoria: recorrente.categoria,
+                tipo: recorrente.tipo,
+                parcelas: recorrente.parcelas,
+                parcelas_pagas: recorrente.parcelasPagas,
+                responsavel: recorrente.responsavel,
+                data_inicio: recorrente.dataInicio,
+                ativo: recorrente.ativo,
+                timestamp: recorrente.timestamp,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('recorrentes')
+                .insert(recorrentesComUserId);
+
+            if (error) throw error;
+            console.log('✅ Recorrentes salvos no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar recorrentes:', error);
+            localStorage.setItem('finance_recorrentes', JSON.stringify(recorrentes));
+        }
+    }
+
+    async carregarRecorrentes() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_recorrentes')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('recorrentes')
+                .select('*')
+                .eq('user_id', this.userId)
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            return data ? data.map(item => ({
+                id: item.id,
+                descricao: item.descricao,
+                valor: parseFloat(item.valor),
+                categoria: item.categoria,
+                tipo: item.tipo,
+                parcelas: item.parcelas,
+                parcelasPagas: item.parcelas_pagas,
+                responsavel: item.responsavel,
+                dataInicio: item.data_inicio,
+                ativo: item.ativo,
+                timestamp: item.timestamp
+            })) : [];
+        } catch (error) {
+            console.error('Erro ao carregar recorrentes:', error);
+            return JSON.parse(localStorage.getItem('finance_recorrentes')) || [];
+        }
+    }
+
+    // Métodos para cartões
+    async salvarCartoes(cartoes) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_cartoes', JSON.stringify(cartoes));
+            return;
+        }
+
+        try {
+            await this.supabase
+                .from('cartoes')
+                .delete()
+                .eq('user_id', this.userId);
+
+            const cartoesComUserId = cartoes.map(cartao => ({
+                id: cartao.id,
+                nome: cartao.nome,
+                limite: cartao.limite,
+                dia_fechamento: cartao.diaFechamento,
+                dia_vencimento: cartao.diaVencimento,
+                ativo: cartao.ativo,
+                timestamp: cartao.timestamp,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('cartoes')
+                .insert(cartoesComUserId);
+
+            if (error) throw error;
+            console.log('✅ Cartões salvos no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar cartões:', error);
+            localStorage.setItem('finance_cartoes', JSON.stringify(cartoes));
+        }
+    }
+
+    async carregarCartoes() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_cartoes')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('cartoes')
+                .select('*')
+                .eq('user_id', this.userId)
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            return data ? data.map(item => ({
+                id: item.id,
+                nome: item.nome,
+                limite: parseFloat(item.limite),
+                diaFechamento: item.dia_fechamento,
+                diaVencimento: item.dia_vencimento,
+                ativo: item.ativo,
+                timestamp: item.timestamp
+            })) : [];
+        } catch (error) {
+            console.error('Erro ao carregar cartões:', error);
+            return JSON.parse(localStorage.getItem('finance_cartoes')) || [];
+        }
+    }
+
+    // Métodos para compras no cartão
+    async salvarComprasCartao(comprasCartao) {
+        if (!this.supabase) {
+            localStorage.setItem('finance_comprasCartao', JSON.stringify(comprasCartao));
+            return;
+        }
+
+        try {
+            await this.supabase
+                .from('compras_cartao')
+                .delete()
+                .eq('user_id', this.userId);
+
+            const comprasComUserId = comprasCartao.map(compra => ({
+                id: compra.id,
+                cartao_id: compra.cartaoId,
+                descricao: compra.descricao,
+                valor: compra.valor,
+                categoria: compra.categoria,
+                parcelas: compra.parcelas,
+                parcelas_pagas: compra.parcelasPagas,
+                data_compra: compra.dataCompra,
+                ativa: compra.ativa,
+                timestamp: compra.timestamp,
+                user_id: this.userId
+            }));
+
+            const { error } = await this.supabase
+                .from('compras_cartao')
+                .insert(comprasComUserId);
+
+            if (error) throw error;
+            console.log('✅ Compras cartão salvas no Supabase');
+        } catch (error) {
+            console.error('Erro ao salvar compras cartão:', error);
+            localStorage.setItem('finance_comprasCartao', JSON.stringify(comprasCartao));
+        }
+    }
+
+    async carregarComprasCartao() {
+        if (!this.supabase) {
+            return JSON.parse(localStorage.getItem('finance_comprasCartao')) || [];
+        }
+
+        try {
+            const { data, error } = await this.supabase
+                .from('compras_cartao')
+                .select('*')
+                .eq('user_id', this.userId)
+                .order('timestamp', { ascending: false });
+
+            if (error) throw error;
+
+            return data ? data.map(item => ({
+                id: item.id,
+                cartaoId: item.cartao_id,
+                descricao: item.descricao,
+                valor: parseFloat(item.valor),
+                categoria: item.categoria,
+                parcelas: item.parcelas,
+                parcelasPagas: item.parcelas_pagas,
+                dataCompra: item.data_compra,
+                ativa: item.ativa,
+                timestamp: item.timestamp
+            })) : [];
+        } catch (error) {
+            console.error('Erro ao carregar compras cartão:', error);
+            return JSON.parse(localStorage.getItem('finance_comprasCartao')) || [];
+        }
+    }
+
+    // Método para verificar conexão
+    async testarConexao() {
+        if (!this.supabase) return false;
+        
+        try {
+            const { error } = await this.supabase
+                .from('gastos')
+                .select('count')
+                .limit(1);
+            
+            return !error;
+        } catch (error) {
+            return false;
+        }
+    }
+}
+
 class FinanceApp {
     constructor() {
-        console.log('🔄 SISTEMA INICIADO - Versão 4.3 - ' + new Date().toISOString());
+        console.log('🔄 SISTEMA INICIADO - Versão 5.0 - ' + new Date().toISOString());
 
+        this.db = new DatabaseService();
         
-        this.gastos = this.carregarDados('gastos') || [];
-        this.ganhos = this.carregarDados('ganhos') || [];
-        this.pessoas = this.carregarDados('pessoas') || [];
-        this.recorrentes = this.carregarDados('recorrentes') || [];
-        this.cartoes = this.carregarDados('cartoes') || [];
-        this.comprasCartao = this.carregarDados('comprasCartao') || [];
+        // Inicializar arrays vazios - os dados serão carregados assincronamente
+        this.gastos = [];
+        this.ganhos = [];
+        this.pessoas = [];
+        this.recorrentes = [];
+        this.cartoes = [];
+        this.comprasCartao = [];
         
         this.filtrosAtivos = {
             status: 'todos',
@@ -19,16 +487,57 @@ class FinanceApp {
         this.chartCategorias = null;
         this.chartEvolucao = null;
         
-        // Verificar conexão - MOVER PARA DEPOIS DA INICIALIZAÇÃO
-        this.verificarConexao();
-        this.inicializarApp();
+        this.carregarTodosDados().then(() => {
+            this.verificarConexao();
+            this.inicializarApp();
+        }).catch(error => {
+            console.error('Erro ao carregar dados:', error);
+            this.inicializarApp();
+        });
+    }
+
+    async carregarTodosDados() {
+        console.log('📦 Carregando dados do banco...');
+        
+        // Carrega todos os dados em paralelo
+        const [
+            gastos, 
+            ganhos, 
+            pessoas, 
+            recorrentes, 
+            cartoes, 
+            comprasCartao
+        ] = await Promise.all([
+            this.db.carregarGastos(),
+            this.db.carregarGanhos(),
+            this.db.carregarPessoas(),
+            this.db.carregarRecorrentes(),
+            this.db.carregarCartoes(),
+            this.db.carregarComprasCartao()
+        ]);
+
+        this.gastos = gastos;
+        this.ganhos = ganhos;
+        this.pessoas = pessoas;
+        this.recorrentes = recorrentes;
+        this.cartoes = cartoes;
+        this.comprasCartao = comprasCartao;
+
+        console.log('✅ Dados carregados:', {
+            gastos: this.gastos.length,
+            ganhos: this.ganhos.length,
+            pessoas: this.pessoas.length,
+            recorrentes: this.recorrentes.length,
+            cartoes: this.cartoes.length,
+            comprasCartao: this.comprasCartao.length
+        });
     }
 
     inicializarApp() {
         console.log('✅ Inicializando sistema...');
         this.configurarEventos();
         this.atualizarDashboard();
-        this.atualizarListaTransacoes(); // Método que estava faltando
+        this.atualizarListaTransacoes();
         this.atualizarListaPessoas();
         this.atualizarListaRecorrentes();
         this.atualizarListaCartoes();
@@ -179,12 +688,12 @@ class FinanceApp {
     }
 
     // ========== NOVO MÉTODO PARA MARCAR GASTO COMO PAGO ==========
-    marcarGastoPago(gastoId) {
+    async marcarGastoPago(gastoId) {
         const gasto = this.gastos.find(g => g.id === gastoId);
         if (gasto) {
             gasto.pago = true;
             gasto.dataPagamento = new Date().toISOString().split('T')[0];
-            this.salvarDados('gastos', this.gastos);
+            await this.db.salvarGastos(this.gastos);
             this.refreshCompleto();
             this.mostrarToast('Gasto marcado como pago!', 'success');
         }
@@ -452,7 +961,7 @@ class FinanceApp {
     }
 
     // ========== CRUD GASTOS ==========
-    salvarGasto() {
+    async salvarGasto() {
         const id = document.getElementById('gastoId');
         const descricao = document.getElementById('descricaoGasto');
         const valor = document.getElementById('valorGasto');
@@ -496,7 +1005,7 @@ class FinanceApp {
             this.mostrarToast('Gasto adicionado!', 'success');
         }
 
-        this.salvarDados('gastos', this.gastos);
+        await this.db.salvarGastos(this.gastos);
         this.fecharModal('gasto');
         this.refreshCompleto();
     }
@@ -522,17 +1031,17 @@ class FinanceApp {
         }
     }
 
-    excluirGasto(gastoId) {
-        this.mostrarConfirmacao('Excluir este gasto?', () => {
+    async excluirGasto(gastoId) {
+        this.mostrarConfirmacao('Excluir este gasto?', async () => {
             this.gastos = this.gastos.filter(g => g.id !== gastoId);
-            this.salvarDados('gastos', this.gastos);
+            await this.db.salvarGastos(this.gastos);
             this.refreshCompleto();
             this.mostrarToast('Gasto excluído!', 'success');
         });
     }
 
     // ========== CRUD GANHOS ==========
-    salvarGanho() {
+    async salvarGanho() {
         const id = document.getElementById('ganhoId');
         const descricao = document.getElementById('descricaoGanho');
         const valor = document.getElementById('valorGanho');
@@ -570,7 +1079,7 @@ class FinanceApp {
             this.mostrarToast('Ganho adicionado!', 'success');
         }
 
-        this.salvarDados('ganhos', this.ganhos);
+        await this.db.salvarGanhos(this.ganhos);
         this.fecharModal('ganho');
         this.refreshCompleto();
     }
@@ -592,17 +1101,17 @@ class FinanceApp {
         }
     }
 
-    excluirGanho(ganhoId) {
-        this.mostrarConfirmacao('Excluir este ganho?', () => {
+    async excluirGanho(ganhoId) {
+        this.mostrarConfirmacao('Excluir este ganho?', async () => {
             this.ganhos = this.ganhos.filter(g => g.id !== ganhoId);
-            this.salvarDados('ganhos', this.ganhos);
+            await this.db.salvarGanhos(this.ganhos);
             this.refreshCompleto();
             this.mostrarToast('Ganho excluído!', 'success');
         });
     }
 
     // ========== CRUD PESSOAS ==========
-    salvarPessoa() {
+    async salvarPessoa() {
         const id = document.getElementById('pessoaId');
         const nome = document.getElementById('nomePessoa');
 
@@ -631,7 +1140,7 @@ class FinanceApp {
             this.mostrarToast('Pessoa adicionada!', 'success');
         }
 
-        this.salvarDados('pessoas', this.pessoas);
+        await this.db.salvarPessoas(this.pessoas);
         this.carregarSelectPessoas();
         this.fecharModal('pessoa');
         this.refreshCompleto();
@@ -708,7 +1217,7 @@ class FinanceApp {
         }
     }
 
-    excluirPessoaEFluxo(index) {
+    async excluirPessoaEFluxo(index) {
         const nome = this.pessoas[index];
         this.pessoas.splice(index, 1);
         
@@ -718,15 +1227,15 @@ class FinanceApp {
             }
         });
 
-        this.salvarDados('pessoas', this.pessoas);
-        this.salvarDados('gastos', this.gastos);
+        await this.db.salvarPessoas(this.pessoas);
+        await this.db.salvarGastos(this.gastos);
         this.carregarSelectPessoas();
         this.refreshCompleto();
         this.mostrarToast('Pessoa excluída!', 'success');
     }
 
     // ========== CORREÇÃO 3: Recorrentes Parcelados para Outras Pessoas em 1x ==========
-    salvarRecorrente() {
+    async salvarRecorrente() {
         const id = document.getElementById('recorrenteId');
         const descricao = document.getElementById('descricaoRecorrente');
         const valor = document.getElementById('valorRecorrente');
@@ -797,7 +1306,7 @@ class FinanceApp {
             }
         }
 
-        this.salvarDados('recorrentes', this.recorrentes);
+        await this.db.salvarRecorrentes(this.recorrentes);
         this.fecharModal('recorrente');
         this.refreshCompleto();
     }
@@ -909,7 +1418,7 @@ class FinanceApp {
     }
 
     // REGRA 1: Gerar transação para recorrente do "EU"
-    gerarTransacaoRecorrente(recorrente) {
+    async gerarTransacaoRecorrente(recorrente) {
         const hoje = new Date();
         const dataInicio = new Date(recorrente.dataInicio);
         
@@ -937,30 +1446,30 @@ class FinanceApp {
                 };
                 
                 this.gastos.push(novoGasto);
-                this.salvarDados('gastos', this.gastos);
+                await this.db.salvarGastos(this.gastos);
                 this.mostrarToast(`Gasto recorrente "${recorrente.descricao}" gerado!`, 'info');
             }
         }
     }
 
     // REGRA 2: Atualizar dívida da pessoa quando cadastrar recorrente parcelado
-    atualizarDividaPessoa(recorrente) {
+    async atualizarDividaPessoa(recorrente) {
         const pessoa = recorrente.responsavel;
         const pessoaIndex = this.pessoas.findIndex(p => p === pessoa);
         
         if (pessoaIndex === -1) {
             this.pessoas.push(pessoa);
-            this.salvarDados('pessoas', this.pessoas);
+            await this.db.salvarPessoas(this.pessoas);
             this.carregarSelectPessoas();
         }
         
         // Para outras pessoas, sempre gera um gasto fixo
-        this.gerarGastoRecorrentePessoa(recorrente);
+        await this.gerarGastoRecorrentePessoa(recorrente);
         
         this.mostrarToast(`Dívida de ${pessoa} atualizada!`, 'info');
     }
 
-    gerarGastosParceladosPessoa(recorrente) {
+    async gerarGastosParceladosPessoa(recorrente) {
         for (let i = 1; i <= recorrente.parcelas; i++) {
             const dataParcela = this.calcularDataParcela(recorrente.dataInicio, i);
             
@@ -991,11 +1500,11 @@ class FinanceApp {
             }
         }
         
-        this.salvarDados('gastos', this.gastos);
+        await this.db.salvarGastos(this.gastos);
     }
 
     // ========== MÉTODO PARA GERAR GASTO RECORRENTE PESSOA ==========
-    gerarGastoRecorrentePessoa(recorrente) {
+    async gerarGastoRecorrentePessoa(recorrente) {
         const dataGasto = recorrente.dataInicio;
         
         const gastoExistente = this.gastos.find(gasto => 
@@ -1020,7 +1529,7 @@ class FinanceApp {
             };
             
             this.gastos.push(gastoMensal);
-            this.salvarDados('gastos', this.gastos);
+            await this.db.salvarGastos(this.gastos);
         }
     }
 
@@ -1077,150 +1586,149 @@ class FinanceApp {
         }
     }
 
-    excluirRecorrente(recorrenteId) {
-        this.mostrarConfirmacao('Excluir este recorrente?', () => {
+    async excluirRecorrente(recorrenteId) {
+        this.mostrarConfirmacao('Excluir este recorrente?', async () => {
             this.recorrentes = this.recorrentes.filter(r => r.id !== recorrenteId);
-            this.salvarDados('recorrentes', this.recorrentes);
+            await this.db.salvarRecorrentes(this.recorrentes);
             this.refreshCompleto();
             this.mostrarToast('Recorrente excluído!', 'success');
         });
     }
 
     // ========== TOGGLE STATUS RECORRENTE ==========
-    toggleRecorrenteAtivo(recorrenteId) {
+    async toggleRecorrenteAtivo(recorrenteId) {
         const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
         if (recorrente) {
             recorrente.ativo = !recorrente.ativo;
-            this.salvarDados('recorrentes', this.recorrentes);
+            await this.db.salvarRecorrentes(this.recorrentes);
             this.refreshCompleto();
             this.mostrarToast(`Recorrente ${recorrente.ativo ? 'ativado' : 'desativado'}!`, 'success');
         }
     }
 
     // ========== PAGAMENTO PARCIAL/TOTAL DE PESSOAS ==========
-    marcarParcelaPaga(recorrenteId) {
-    const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
-    if (recorrente && recorrente.parcelas) {
-        if (recorrente.parcelasPagas < recorrente.parcelas) {
-            recorrente.parcelasPagas++;
-            
-            const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas);
-            
-            // ATUALIZA O GASTO CORRESPONDENTE NO SISTEMA
-            const gastoCorrespondente = this.gastos.find(g => 
-                g.recorrenteId === recorrenteId && 
-                g.parcelaNumero === recorrente.parcelasPagas
-            );
-            
-            if (gastoCorrespondente) {
-                gastoCorrespondente.pago = true;
-                gastoCorrespondente.dataPagamento = new Date().toISOString().split('T')[0];
-            }
+    async marcarParcelaPaga(recorrenteId) {
+        const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
+        if (recorrente && recorrente.parcelas) {
+            if (recorrente.parcelasPagas < recorrente.parcelas) {
+                recorrente.parcelasPagas++;
+                
+                const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas);
+                
+                // ATUALIZA O GASTO CORRESPONDENTE NO SISTEMA
+                const gastoCorrespondente = this.gastos.find(g => 
+                    g.recorrenteId === recorrenteId && 
+                    g.parcelaNumero === recorrente.parcelasPagas
+                );
+                
+                if (gastoCorrespondente) {
+                    gastoCorrespondente.pago = true;
+                    gastoCorrespondente.dataPagamento = new Date().toISOString().split('T')[0];
+                }
 
-            // Se for de outra pessoa, cria ganho
-            if (recorrente.responsavel !== 'Eu') {
-                const ganhoParcela = {
-                    id: Date.now(),
-                    descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
-                    valor: recorrente.valor,
-                    data: dataParcela,
-                    tipo: 'ganho',
-                    origem: 'pagamento_pessoa',
-                    pessoaOrigem: recorrente.responsavel,
-                    timestamp: new Date().toISOString()
-                };
-                this.ganhos.push(ganhoParcela);
-                this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
-            } else {
-                this.mostrarToast('Parcela paga!', 'success');
-            }
+                // Se for de outra pessoa, cria ganho
+                if (recorrente.responsavel !== 'Eu') {
+                    const ganhoParcela = {
+                        id: Date.now(),
+                        descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
+                        valor: recorrente.valor,
+                        data: dataParcela,
+                        tipo: 'ganho',
+                        origem: 'pagamento_pessoa',
+                        pessoaOrigem: recorrente.responsavel,
+                        timestamp: new Date().toISOString()
+                    };
+                    this.ganhos.push(ganhoParcela);
+                    this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
+                } else {
+                    this.mostrarToast('Parcela paga!', 'success');
+                }
 
-            if (recorrente.parcelasPagas === recorrente.parcelas) {
-                recorrente.ativo = false;
-            }
+                if (recorrente.parcelasPagas === recorrente.parcelas) {
+                    recorrente.ativo = false;
+                }
 
-            this.salvarDados('recorrentes', this.recorrentes);
-            this.salvarDados('gastos', this.gastos);
-            this.salvarDados('ganhos', this.ganhos);
-            this.refreshCompleto();
+                await this.db.salvarRecorrentes(this.recorrentes);
+                await this.db.salvarGastos(this.gastos);
+                await this.db.salvarGanhos(this.ganhos);
+                this.refreshCompleto();
             }
         }
     }
 
     // ========== PAGAMENTO PARCIAL DE GASTOS DE PESSOAS ==========
-    receberPagamentoParcial(gastoId, valorPago) {
-    const gasto = this.gastos.find(g => g.id === gastoId);
-    if (!gasto) {
-        this.mostrarToast('Gasto não encontrado', 'error');
-        return;
-    }
-    if (gasto.responsavel === 'Eu') {
-        this.mostrarToast('Não é possível receber de "Eu"', 'error');
-        return;
-    }
+    async receberPagamentoParcial(gastoId, valorPago) {
+        const gasto = this.gastos.find(g => g.id === gastoId);
+        if (!gasto) {
+            this.mostrarToast('Gasto não encontrado', 'error');
+            return;
+        }
+        if (gasto.responsavel === 'Eu') {
+            this.mostrarToast('Não é possível receber de "Eu"', 'error');
+            return;
+        }
 
-    valorPago = parseFloat(valorPago);
-    if (isNaN(valorPago) || valorPago <= 0) {
-        this.mostrarToast('Valor inválido', 'error');
-        return;
-    }
+        valorPago = parseFloat(valorPago);
+        if (isNaN(valorPago) || valorPago <= 0) {
+            this.mostrarToast('Valor inválido', 'error');
+            return;
+        }
 
-    const hojeStr = new Date().toISOString().split('T')[0];
-    const valorRestante = parseFloat((gasto.valor - valorPago).toFixed(2));
+        const hojeStr = new Date().toISOString().split('T')[0];
+        const valorRestante = parseFloat((gasto.valor - valorPago).toFixed(2));
 
-    // Gera ganho referente ao pagamento recebido
-    const ganhoPagamento = {
-        id: Date.now(),
-        descricao: `Pagamento de ${gasto.responsavel} - ${gasto.descricao}`,
-        valor: parseFloat(valorPago.toFixed(2)),
-        data: hojeStr,
-        tipo: 'ganho',
-        origem: 'pagamento_pessoa',
-        pessoaOrigem: gasto.responsavel,
-        timestamp: new Date().toISOString()
-    };
-    this.ganhos.push(ganhoPagamento);
+        // Gera ganho referente ao pagamento recebido
+        const ganhoPagamento = {
+            id: Date.now(),
+            descricao: `Pagamento de ${gasto.responsavel} - ${gasto.descricao}`,
+            valor: parseFloat(valorPago.toFixed(2)),
+            data: hojeStr,
+            tipo: 'ganho',
+            origem: 'pagamento_pessoa',
+            pessoaOrigem: gasto.responsavel,
+            timestamp: new Date().toISOString()
+        };
+        this.ganhos.push(ganhoPagamento);
 
-    // ATUALIZA O RECORRENTE SE EXISTIR
-    if (gasto.recorrenteId) {
-        const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
-        if (recorrente && recorrente.tipo === 'parcelado') {
-            // Encontra a parcela correspondente e marca como paga
-            const parcelaNumero = gasto.parcelaNumero;
-            if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
-                recorrente.parcelasPagas++;
-                this.mostrarToast(`Parcela ${parcelaNumero} marcada como paga no recorrente!`, 'success');
-                
-                if (recorrente.parcelasPagas === recorrente.parcelas) {
-                    recorrente.ativo = false;
+        // ATUALIZA O RECORRENTE SE EXISTIR
+        if (gasto.recorrenteId) {
+            const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
+            if (recorrente && recorrente.tipo === 'parcelado') {
+                // Encontra a parcela correspondente e marca como paga
+                const parcelaNumero = gasto.parcelaNumero;
+                if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
+                    recorrente.parcelasPagas++;
+                    this.mostrarToast(`Parcela ${parcelaNumero} marcada como paga no recorrente!`, 'success');
+                    
+                    if (recorrente.parcelasPagas === recorrente.parcelas) {
+                        recorrente.ativo = false;
+                    }
+                    
+                    await this.db.salvarRecorrentes(this.recorrentes);
                 }
-                
-                this.salvarDados('recorrentes', this.recorrentes);
             }
         }
-    }
 
-    if (valorRestante <= 0) {
-        // quitou totalmente
-        gasto.pago = true;
-        gasto.dataPagamento = hojeStr;
-        this.mostrarToast('Pagamento total recebido e gasto marcado como pago', 'success');
-    } else {
-        // ainda pendente: reduz o valor do gasto para o restante
-        gasto.valor = valorRestante;
-        this.mostrarToast('Pagamento parcial registrado. Restante pendente atualizado.', 'success');
-    }
+        if (valorRestante <= 0) {
+            // quitou totalmente
+            gasto.pago = true;
+            gasto.dataPagamento = hojeStr;
+            this.mostrarToast('Pagamento total recebido e gasto marcado como pago', 'success');
+        } else {
+            // ainda pendente: reduz o valor do gasto para o restante
+            gasto.valor = valorRestante;
+            this.mostrarToast('Pagamento parcial registrado. Restante pendente atualizado.', 'success');
+        }
 
-    this.salvarDados('gastos', this.gastos);
-    this.salvarDados('ganhos', this.ganhos);
-    this.refreshCompleto();
+        await this.db.salvarGastos(this.gastos);
+        await this.db.salvarGanhos(this.ganhos);
+        this.refreshCompleto();
     }
 
     mostrarModalPagamentoParcial(gastoId) {
         const gasto = this.gastos.find(g => g.id === gastoId);
         if (!gasto || gasto.responsavel === 'Eu') return;
         
-        // Mantém UI existente mas chama novo método receberPagamentoParcial
         const modal = document.createElement('div');
         modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;`;
@@ -1310,7 +1818,6 @@ class FinanceApp {
                         </div>
         `;
         
-        // Mostra cada previsão com descrições no campo "Detalhes" e botão para receber o total do mês
         previsaoMensal.forEach(previsao => {
             const detalheTexto = previsao.detalhes.descricoes.length > 0 ? previsao.detalhes.descricoes.join('<br>') : '-';
             detalhesHTML += `
@@ -1508,60 +2015,60 @@ class FinanceApp {
     }
 
     // ========== MÉTODO PARA RECEBER TOTAL DO MÊS ==========
-    receberTotalMesPessoa(nomePessoa, mesISO) {
-    const gastosPendentes = this.gastos.filter(g => 
-        g.responsavel === nomePessoa && 
-        !g.pago && 
-        g.data.startsWith(mesISO)
-    );
+    async receberTotalMesPessoa(nomePessoa, mesISO) {
+        const gastosPendentes = this.gastos.filter(g => 
+            g.responsavel === nomePessoa && 
+            !g.pago && 
+            g.data.startsWith(mesISO)
+        );
 
-    if (gastosPendentes.length === 0) {
-        this.mostrarToast('Nenhum gasto pendente para este mês', 'warning');
-        return;
-    }
+        if (gastosPendentes.length === 0) {
+            this.mostrarToast('Nenhum gasto pendente para este mês', 'warning');
+            return;
+        }
 
-    const total = gastosPendentes.reduce((sum, g) => sum + g.valor, 0);
-    const hojeStr = new Date().toISOString().split('T')[0];
+        const total = gastosPendentes.reduce((sum, g) => sum + g.valor, 0);
+        const hojeStr = new Date().toISOString().split('T')[0];
 
-    // Gera ganho referente ao pagamento total do mês
-    const ganhoTotal = {
-        id: Date.now(),
-        descricao: `Pagamento total de ${nomePessoa} - ${this.formatarMes(mesISO)}`,
-        valor: total,
-        data: hojeStr,
-        tipo: 'ganho',
-        origem: 'pagamento_pessoa',
-        pessoaOrigem: nomePessoa,
-        timestamp: new Date().toISOString()
-    };
-    this.ganhos.push(ganhoTotal);
+        // Gera ganho referente ao pagamento total do mês
+        const ganhoTotal = {
+            id: Date.now(),
+            descricao: `Pagamento total de ${nomePessoa} - ${this.formatarMes(mesISO)}`,
+            valor: total,
+            data: hojeStr,
+            tipo: 'ganho',
+            origem: 'pagamento_pessoa',
+            pessoaOrigem: nomePessoa,
+            timestamp: new Date().toISOString()
+        };
+        this.ganhos.push(ganhoTotal);
 
-    // ATUALIZA RECORRENTES
-    gastosPendentes.forEach(gasto => {
-        gasto.pago = true;
-        gasto.dataPagamento = hojeStr;
-        
-        // Atualiza o recorrente se existir
-        if (gasto.recorrenteId) {
-            const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
-            if (recorrente && recorrente.tipo === 'parcelado') {
-                const parcelaNumero = gasto.parcelaNumero;
-                if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
-                    recorrente.parcelasPagas++;
-                    
-                    if (recorrente.parcelasPagas === recorrente.parcelas) {
-                        recorrente.ativo = false;
+        // ATUALIZA RECORRENTES
+        gastosPendentes.forEach(gasto => {
+            gasto.pago = true;
+            gasto.dataPagamento = hojeStr;
+            
+            // Atualiza o recorrente se existir
+            if (gasto.recorrenteId) {
+                const recorrente = this.recorrentes.find(r => r.id === gasto.recorrenteId);
+                if (recorrente && recorrente.tipo === 'parcelado') {
+                    const parcelaNumero = gasto.parcelaNumero;
+                    if (parcelaNumero && parcelaNumero === recorrente.parcelasPagas + 1) {
+                        recorrente.parcelasPagas++;
+                        
+                        if (recorrente.parcelasPagas === recorrente.parcelas) {
+                            recorrente.ativo = false;
+                        }
                     }
                 }
             }
-        }
-    });
+        });
 
-    this.salvarDados('ganhos', this.ganhos);
-    this.salvarDados('gastos', this.gastos);
-    this.salvarDados('recorrentes', this.recorrentes);
-    this.refreshCompleto();
-    this.mostrarToast(`Pagamento total de ${this.formatarMes(mesISO)} recebido de ${nomePessoa}!`, 'success');
+        await this.db.salvarGanhos(this.ganhos);
+        await this.db.salvarGastos(this.gastos);
+        await this.db.salvarRecorrentes(this.recorrentes);
+        this.refreshCompleto();
+        this.mostrarToast(`Pagamento total de ${this.formatarMes(mesISO)} recebido de ${nomePessoa}!`, 'success');
     }
 
     mostrarModalDetalhes(conteudo) {
@@ -1590,7 +2097,7 @@ class FinanceApp {
     }
 
     // ========== CRUD CARTÕES ==========
-    salvarCartao() {
+    async salvarCartao() {
         const id = document.getElementById('cartaoId');
         const nome = document.getElementById('nomeCartao');
         const limite = document.getElementById('limiteCartao');
@@ -1628,7 +2135,7 @@ class FinanceApp {
             this.mostrarToast('Cartão adicionado!', 'success');
         }
 
-        this.salvarDados('cartoes', this.cartoes);
+        await this.db.salvarCartoes(this.cartoes);
         this.fecharModal('cartao');
         this.atualizarListaCartoes();
         this.carregarSelectCartoes();
@@ -1662,14 +2169,14 @@ class FinanceApp {
         }
     }
 
-    excluirCartao(cartaoId) {
-        this.mostrarConfirmacao('Excluir este cartão? Todas as compras serão perdidas.', () => {
+    async excluirCartao(cartaoId) {
+        this.mostrarConfirmacao('Excluir este cartão? Todas as compras serão perdidas.', async () => {
             this.cartoes = this.cartoes.filter(c => c.id !== cartaoId);
             // Remove também as compras deste cartão
             this.comprasCartao = this.comprasCartao.filter(compra => compra.cartaoId !== cartaoId);
             
-            this.salvarDados('cartoes', this.cartoes);
-            this.salvarDados('comprasCartao', this.comprasCartao);
+            await this.db.salvarCartoes(this.cartoes);
+            await this.db.salvarComprasCartao(this.comprasCartao);
             this.atualizarListaCartoes();
             this.atualizarListaComprasCartao();
             this.mostrarToast('Cartão excluído!', 'success');
@@ -1677,7 +2184,7 @@ class FinanceApp {
     }
 
     // ========== COMPRAS NO CARTÃO ==========
-    salvarCompraCartao() {
+    async salvarCompraCartao() {
         const id = document.getElementById('compraCartaoId');
         const cartaoId = document.getElementById('cartaoCompra');
         const descricao = document.getElementById('descricaoCompraCartao');
@@ -1720,17 +2227,17 @@ class FinanceApp {
             this.mostrarToast('Compra adicionada!', 'success');
             
             // REGRA 4: Gera transações de gasto para o cartão
-            this.gerarTransacoesCartao(compra);
+            await this.gerarTransacoesCartao(compra);
         }
 
-        this.salvarDados('comprasCartao', this.comprasCartao);
+        await this.db.salvarComprasCartao(this.comprasCartao);
         this.fecharModal('compraCartao');
         this.atualizarListaComprasCartao();
         this.atualizarListaCartoes();
     }
 
     // REGRA 4: Gerar transações para compras no cartão
-    gerarTransacoesCartao(compra) {
+    async gerarTransacoesCartao(compra) {
         const cartao = this.cartoes.find(c => c.id === compra.cartaoId);
         if (!cartao) return;
 
@@ -1767,7 +2274,7 @@ class FinanceApp {
             }
         }
         
-        this.salvarDados('gastos', this.gastos);
+        await this.db.salvarGastos(this.gastos);
         this.refreshCompleto();
     }
 
@@ -2083,15 +2590,15 @@ class FinanceApp {
         }).join('');
     }
 
-    excluirCompraCartao(compraId) {
-        this.mostrarConfirmacao('Excluir esta compra? Todas as parcelas serão removidas.', () => {
+    async excluirCompraCartao(compraId) {
+        this.mostrarConfirmacao('Excluir esta compra? Todas as parcelas serão removidas.', async () => {
             // Remove a compra
             this.comprasCartao = this.comprasCartao.filter(c => c.id !== compraId);
             // Remove as transações geradas por esta compra
             this.gastos = this.gastos.filter(g => g.compraCartaoId !== compraId);
             
-            this.salvarDados('comprasCartao', this.comprasCartao);
-            this.salvarDados('gastos', this.gastos);
+            await this.db.salvarComprasCartao(this.comprasCartao);
+            await this.db.salvarGastos(this.gastos);
             this.atualizarListaComprasCartao();
             this.atualizarListaCartoes();
             this.refreshCompleto();
@@ -2404,7 +2911,7 @@ class FinanceApp {
         return meses;
     }
 
-        // ========== VERIFICAÇÃO DE CONEXÃO ==========
+    // ========== VERIFICAÇÃO DE CONEXÃO ==========
     verificarConexao() {
         if (!navigator.onLine) {
             this.mostrarToast('Modo offline ativado', 'info');
@@ -2481,7 +2988,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Forçar atualização de versão
-const VERSION_ATUAL = '4.3';
+const VERSION_ATUAL = '5.0';
 if (localStorage.getItem('app_version') !== VERSION_ATUAL) {
     localStorage.setItem('app_version', VERSION_ATUAL);
     console.log('🆕 Nova versão instalada!');
