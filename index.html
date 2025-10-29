@@ -36,6 +36,15 @@
             <div class="saldo-total">
                 <span id="saldo">R$ 0,00</span>
             </div>
+            <!-- Adicione isso na seção dashboard ou transactions -->
+            <div class="sync-section" style="margin: 15px 0; text-align: center; padding: 10px; background: #f8f9fa; border-radius: 10px;">
+                <button onclick="app.recarregarDoBanco()" class="btn-primary" style="padding: 10px 15px;">
+                    <i class="fas fa-sync-alt"></i> Sincronizar com Banco
+                </button>
+                <small style="display: block; margin-top: 5px; color: #666;">
+                    Atualiza dados do banco de dados
+                </small>
+            </div>
         </header>
 
         <!-- Menu de Navegação -->

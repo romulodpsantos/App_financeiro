@@ -4,88 +4,61 @@ class DatabaseService {
         this.supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkb29uYWpsdGF4b3h4YWJ5b2tiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3Njc0NzEsImV4cCI6MjA3NzM0MzQ3MX0.VqkYp-jx-GpPdYzNv9JsRtFl5nHSKSv9Tr_0OTGwM8I';
         this.supabase = null;
         this.userId = this.getUserId();
+        this.initialized = false;
+        
+        console.log('🔄 DatabaseService iniciado');
         this.init();
     }
 
-    init() {
-        // Carrega o cliente Supabase via CDN
-        if (typeof supabase === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-            script.onload = () => {
-                this.supabase = supabase.createClient(this.supabaseUrl, this.supabaseKey);
-                console.log('✅ Supabase inicializado');
-            };
-            document.head.appendChild(script);
-        } else {
+    async init() {
+        try {
+            if (typeof supabase === 'undefined') {
+                await this.loadSupabaseScript();
+            }
+            
             this.supabase = supabase.createClient(this.supabaseUrl, this.supabaseKey);
+            this.initialized = true;
             console.log('✅ Supabase inicializado');
-        }
-    }
-
-    getUserId() {
-        let userId = localStorage.getItem('user_id');
-        if (!userId) {
-            userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('user_id', userId);
-        }
-        return userId;
-    }
-
-    // Métodos para gastos
-    async salvarGastos(gastos) {
-        if (!this.supabase) {
-            localStorage.setItem('finance_gastos', JSON.stringify(gastos));
-            return;
-        }
-
-        try {
-            // Remove dados antigos
-            await this.supabase
-                .from('gastos')
-                .delete()
-                .eq('user_id', this.userId);
-
-            // Insere novos dados
-            const gastosComUserId = gastos.map(gasto => ({
-                id: gasto.id,
-                descricao: gasto.descricao,
-                valor: gasto.valor,
-                categoria: gasto.categoria,
-                responsavel: gasto.responsavel,
-                data: gasto.data,
-                pago: gasto.pago,
-                data_pagamento: gasto.dataPagamento,
-                tipo: gasto.tipo,
-                recorrente_id: gasto.recorrenteId,
-                parcela_numero: gasto.parcelaNumero,
-                total_parcelas: gasto.totalParcelas,
-                cartao_id: gasto.cartaoId,
-                compra_cartao_id: gasto.compraCartaoId,
-                timestamp: gasto.timestamp,
-                user_id: this.userId
-            }));
-
-            const { error } = await this.supabase
-                .from('gastos')
-                .insert(gastosComUserId);
-
-            if (error) throw error;
-            console.log('✅ Gastos salvos no Supabase');
         } catch (error) {
-            console.error('Erro ao salvar gastos:', error);
-            localStorage.setItem('finance_gastos', JSON.stringify(gastos));
+            console.error('❌ Erro inicialização:', error);
+            this.initialized = false;
         }
     }
 
-    async carregarGastos() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_gastos')) || [];
+    loadSupabaseScript() {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.38.0/dist/umd/supabase.min.js';
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error('Falha ao carregar Supabase'));
+            document.head.appendChild(script);
+        });
+    }
+
+    async waitForInitialization() {
+        if (this.initialized) return true;
+        for (let i = 0; i < 50; i++) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            if (this.initialized) return true;
+        }
+        return false;
+    }
+
+    // **MÉTODO CRÍTICO CORRIGIDO**: Sempre tenta carregar do banco primeiro
+    async carregarDados(tabela, chaveLocalStorage, mapearDados) {
+        const isInitialized = await this.waitForInitialization();
+        
+        // Se não conseguiu conectar, usa localStorage
+        if (!isInitialized || !this.supabase) {
+            console.log(`📱 Offline: ${tabela} do localStorage`);
+            return this.getFromLocalStorage(chaveLocalStorage);
         }
 
         try {
+            console.log(`🔄 Tentando carregar ${tabela} do Supabase...`);
+            
             const { data, error } = await this.supabase
-                .from('gastos')
+                .from(tabela)
                 .select('*')
                 .eq('user_id', this.userId)
                 .order('timestamp', { ascending: false });
@@ -93,372 +66,305 @@ class DatabaseService {
             if (error) throw error;
 
             if (data && data.length > 0) {
-                // Converte de volta para o formato original
-                return data.map(item => ({
-                    id: item.id,
-                    descricao: item.descricao,
-                    valor: parseFloat(item.valor),
-                    categoria: item.categoria,
-                    responsavel: item.responsavel,
-                    data: item.data,
-                    pago: item.pago,
-                    dataPagamento: item.data_pagamento,
-                    tipo: item.tipo,
-                    recorrenteId: item.recorrente_id,
-                    parcelaNumero: item.parcela_numero,
-                    totalParcelas: item.total_parcelas,
-                    cartaoId: item.cartao_id,
-                    compraCartaoId: item.compra_cartao_id,
-                    timestamp: item.timestamp
-                }));
+                console.log(`✅ ${data.length} ${tabela} carregados do Supabase`);
+                
+                // **ATUALIZA O LOCALSTORAGE COM DADOS DO BANCO**
+                const dadosMapeados = data.map(mapearDados);
+                localStorage.setItem(chaveLocalStorage, JSON.stringify(dadosMapeados));
+                
+                return dadosMapeados;
+            } else {
+                // Se não tem dados no banco, usa localStorage
+                console.log(`ℹ️ Nenhum ${tabela} no Supabase, usando localStorage`);
+                return this.getFromLocalStorage(chaveLocalStorage);
             }
-            return [];
+            
         } catch (error) {
-            console.error('Erro ao carregar gastos:', error);
-            return JSON.parse(localStorage.getItem('finance_gastos')) || [];
+            console.error(`❌ Erro carregando ${tabela}:`, error);
+            return this.getFromLocalStorage(chaveLocalStorage);
         }
     }
 
-    // Métodos para ganhos
-    async salvarGanhos(ganhos) {
-        if (!this.supabase) {
-            localStorage.setItem('finance_ganhos', JSON.stringify(ganhos));
-            return;
-        }
-
+    getFromLocalStorage(chave) {
         try {
-            await this.supabase
-                .from('ganhos')
-                .delete()
-                .eq('user_id', this.userId);
-
-            const ganhosComUserId = ganhos.map(ganho => ({
-                id: ganho.id,
-                descricao: ganho.descricao,
-                valor: ganho.valor,
-                data: ganho.data,
-                tipo: ganho.tipo,
-                origem: ganho.origem,
-                pessoa_origem: ganho.pessoaOrigem,
-                timestamp: ganho.timestamp,
-                user_id: this.userId
-            }));
-
-            const { error } = await this.supabase
-                .from('ganhos')
-                .insert(ganhosComUserId);
-
-            if (error) throw error;
-            console.log('✅ Ganhos salvos no Supabase');
+            return JSON.parse(localStorage.getItem(chave)) || [];
         } catch (error) {
-            console.error('Erro ao salvar ganhos:', error);
-            localStorage.setItem('finance_ganhos', JSON.stringify(ganhos));
+            console.error(`❌ Erro parse ${chave}:`, error);
+            return [];
         }
+    }
+
+    getUserId() {
+    // ⚠️ USER ID FIXO - mesmo em todos os navegadores ⚠️
+    const userIdFixo = 'user_app_financeiro_romulo';
+    
+    // Verifica se já existe
+    let userId = localStorage.getItem('user_id');
+    
+    if (!userId) {
+        userId = userIdFixo;
+        localStorage.setItem('user_id', userId);
+        console.log('👤 NOVO User ID criado:', userId);
+    } else if (userId !== userIdFixo) {
+        // Se existe mas é diferente, atualiza para o fixo
+        console.log('🔄 User ID diferente encontrado, atualizando para fixo:', userId, '→', userIdFixo);
+        userId = userIdFixo;
+        localStorage.setItem('user_id', userId);
+    }
+    
+    console.log('👤 User ID atual:', userId);
+    return userId;
+    }
+
+    // ========== MÉTODOS ESPECÍFICOS ==========
+    async salvarGastos(gastos) {
+        return await this.salvarDados('gastos', gastos, 'finance_gastos');
+    }
+
+    async carregarGastos() {
+        return await this.carregarDados('gastos', 'finance_gastos', (item) => ({
+            id: item.id,
+            descricao: item.descricao,
+            valor: parseFloat(item.valor),
+            categoria: item.categoria,
+            responsavel: item.responsavel,
+            data: item.data,
+            pago: item.pago,
+            dataPagamento: item.data_pagamento,
+            tipo: item.tipo,
+            recorrenteId: item.recorrente_id,
+            parcelaNumero: item.parcela_numero,
+            totalParcelas: item.total_parcelas,
+            cartaoId: item.cartao_id,
+            compraCartaoId: item.compra_cartao_id,
+            timestamp: item.timestamp
+        }));
+    }
+
+    async salvarGanhos(ganhos) {
+        return await this.salvarDados('ganhos', ganhos, 'finance_ganhos');
     }
 
     async carregarGanhos() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_ganhos')) || [];
-        }
-
-        try {
-            const { data, error } = await this.supabase
-                .from('ganhos')
-                .select('*')
-                .eq('user_id', this.userId)
-                .order('timestamp', { ascending: false });
-
-            if (error) throw error;
-
-            return data ? data.map(item => ({
-                id: item.id,
-                descricao: item.descricao,
-                valor: parseFloat(item.valor),
-                data: item.data,
-                tipo: item.tipo,
-                origem: item.origem,
-                pessoaOrigem: item.pessoa_origem,
-                timestamp: item.timestamp
-            })) : [];
-        } catch (error) {
-            console.error('Erro ao carregar ganhos:', error);
-            return JSON.parse(localStorage.getItem('finance_ganhos')) || [];
-        }
+        return await this.carregarDados('ganhos', 'finance_ganhos', (item) => ({
+            id: item.id,
+            descricao: item.descricao,
+            valor: parseFloat(item.valor),
+            data: item.data,
+            tipo: item.tipo,
+            origem: item.origem,
+            pessoaOrigem: item.pessoa_origem,
+            timestamp: item.timestamp
+        }));
     }
 
-    // Métodos para pessoas
+    // **CORREÇÃO: Método salvarPessoas atualizado**
     async salvarPessoas(pessoas) {
-        if (!this.supabase) {
+        console.log('💾 SALVANDO PESSOAS:', pessoas);
+        
+        // Salva primeiro no localStorage
+        try {
             localStorage.setItem('finance_pessoas', JSON.stringify(pessoas));
-            return;
+            console.log('✅ Pessoas salvas no localStorage');
+        } catch (error) {
+            console.error('❌ Erro salvando pessoas no localStorage:', error);
+        }
+
+        const isInitialized = await this.waitForInitialization();
+        
+        if (!isInitialized || !this.supabase) {
+            console.log('📱 Offline: pessoas salvas localmente');
+            return false;
         }
 
         try {
-            await this.supabase
+            console.log(`💾 Tentando salvar ${pessoas.length} pessoas no Supabase...`);
+            
+            // **CORREÇÃO 1: Remove TODAS as pessoas do user atual**
+            const { error: deleteError } = await this.supabase
                 .from('pessoas')
                 .delete()
                 .eq('user_id', this.userId);
 
-            const pessoasComUserId = pessoas.map((nome, index) => ({
-                id: index + 1,
+            if (deleteError) {
+                console.error('❌ Erro ao deletar pessoas:', deleteError);
+                throw deleteError;
+            }
+            console.log('✅ Pessoas antigas removidas');
+
+            // **CORREÇÃO 2: Usa IDs únicos baseados em timestamp**
+            const pessoasParaInserir = pessoas.map((nome, index) => ({
+                id: Date.now() + index, // ID único baseado em timestamp
                 nome: nome,
                 user_id: this.userId
             }));
 
-            const { error } = await this.supabase
-                .from('pessoas')
-                .insert(pessoasComUserId);
+            console.log('📤 Inserindo pessoas:', pessoasParaInserir);
 
-            if (error) throw error;
-            console.log('✅ Pessoas salvas no Supabase');
+            // Insere novas pessoas
+            const { data: insertData, error: insertError } = await this.supabase
+                .from('pessoas')
+                .insert(pessoasParaInserir);
+
+            if (insertError) {
+                console.error('❌ Erro ao inserir pessoas:', insertError);
+                throw insertError;
+            }
+
+            console.log(`✅ ${pessoas.length} pessoas salvas no Supabase com sucesso!`);
+            return true;
+            
         } catch (error) {
-            console.error('Erro ao salvar pessoas:', error);
-            localStorage.setItem('finance_pessoas', JSON.stringify(pessoas));
+            console.error('❌ Erro completo ao salvar pessoas:', error);
+            return false;
         }
     }
 
     async carregarPessoas() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_pessoas')) || [];
+        const isInitialized = await this.waitForInitialization();
+        
+        if (!isInitialized || !this.supabase) {
+            console.log('📱 Offline: pessoas do localStorage');
+            return this.getFromLocalStorage('finance_pessoas');
         }
 
         try {
+            console.log('🔄 Tentando carregar pessoas do Supabase...');
+            
+            // **CORREÇÃO: Não usa timestamp para pessoas**
             const { data, error } = await this.supabase
                 .from('pessoas')
-                .select('nome')
+                .select('*')
                 .eq('user_id', this.userId)
-                .order('id', { ascending: true });
+                .order('id', { ascending: true }); // Ordena por ID
 
             if (error) throw error;
 
-            return data ? data.map(item => item.nome) : [];
+            if (data && data.length > 0) {
+                console.log(`✅ ${data.length} pessoas carregadas do Supabase`);
+                
+                const nomes = data.map(item => item.nome);
+                localStorage.setItem('finance_pessoas', JSON.stringify(nomes));
+                
+                return nomes;
+            } else {
+                console.log('ℹ️ Nenhuma pessoa no Supabase, usando localStorage');
+                return this.getFromLocalStorage('finance_pessoas');
+            }
+            
         } catch (error) {
-            console.error('Erro ao carregar pessoas:', error);
-            return JSON.parse(localStorage.getItem('finance_pessoas')) || [];
+            console.error('❌ Erro carregando pessoas:', error);
+            return this.getFromLocalStorage('finance_pessoas');
         }
     }
 
-    // Métodos para recorrentes
     async salvarRecorrentes(recorrentes) {
-        if (!this.supabase) {
-            localStorage.setItem('finance_recorrentes', JSON.stringify(recorrentes));
-            return;
-        }
-
-        try {
-            await this.supabase
-                .from('recorrentes')
-                .delete()
-                .eq('user_id', this.userId);
-
-            const recorrentesComUserId = recorrentes.map(recorrente => ({
-                id: recorrente.id,
-                descricao: recorrente.descricao,
-                valor: recorrente.valor,
-                categoria: recorrente.categoria,
-                tipo: recorrente.tipo,
-                parcelas: recorrente.parcelas,
-                parcelas_pagas: recorrente.parcelasPagas,
-                responsavel: recorrente.responsavel,
-                data_inicio: recorrente.dataInicio,
-                ativo: recorrente.ativo,
-                timestamp: recorrente.timestamp,
-                user_id: this.userId
-            }));
-
-            const { error } = await this.supabase
-                .from('recorrentes')
-                .insert(recorrentesComUserId);
-
-            if (error) throw error;
-            console.log('✅ Recorrentes salvos no Supabase');
-        } catch (error) {
-            console.error('Erro ao salvar recorrentes:', error);
-            localStorage.setItem('finance_recorrentes', JSON.stringify(recorrentes));
-        }
+        return await this.salvarDados('recorrentes', recorrentes, 'finance_recorrentes');
     }
 
     async carregarRecorrentes() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_recorrentes')) || [];
-        }
-
-        try {
-            const { data, error } = await this.supabase
-                .from('recorrentes')
-                .select('*')
-                .eq('user_id', this.userId)
-                .order('timestamp', { ascending: false });
-
-            if (error) throw error;
-
-            return data ? data.map(item => ({
-                id: item.id,
-                descricao: item.descricao,
-                valor: parseFloat(item.valor),
-                categoria: item.categoria,
-                tipo: item.tipo,
-                parcelas: item.parcelas,
-                parcelasPagas: item.parcelas_pagas,
-                responsavel: item.responsavel,
-                dataInicio: item.data_inicio,
-                ativo: item.ativo,
-                timestamp: item.timestamp
-            })) : [];
-        } catch (error) {
-            console.error('Erro ao carregar recorrentes:', error);
-            return JSON.parse(localStorage.getItem('finance_recorrentes')) || [];
-        }
+        return await this.carregarDados('recorrentes', 'finance_recorrentes', (item) => ({
+            id: item.id,
+            descricao: item.descricao,
+            valor: parseFloat(item.valor),
+            categoria: item.categoria,
+            tipo: item.tipo,
+            parcelas: item.parcelas,
+            parcelasPagas: item.parcelas_pagas,
+            responsavel: item.responsavel,
+            dataInicio: item.data_inicio,
+            ativo: item.ativo,
+            timestamp: item.timestamp
+        }));
     }
 
-    // Métodos para cartões
     async salvarCartoes(cartoes) {
-        if (!this.supabase) {
-            localStorage.setItem('finance_cartoes', JSON.stringify(cartoes));
-            return;
-        }
-
-        try {
-            await this.supabase
-                .from('cartoes')
-                .delete()
-                .eq('user_id', this.userId);
-
-            const cartoesComUserId = cartoes.map(cartao => ({
-                id: cartao.id,
-                nome: cartao.nome,
-                limite: cartao.limite,
-                dia_fechamento: cartao.diaFechamento,
-                dia_vencimento: cartao.diaVencimento,
-                ativo: cartao.ativo,
-                timestamp: cartao.timestamp,
-                user_id: this.userId
-            }));
-
-            const { error } = await this.supabase
-                .from('cartoes')
-                .insert(cartoesComUserId);
-
-            if (error) throw error;
-            console.log('✅ Cartões salvos no Supabase');
-        } catch (error) {
-            console.error('Erro ao salvar cartões:', error);
-            localStorage.setItem('finance_cartoes', JSON.stringify(cartoes));
-        }
+        return await this.salvarDados('cartoes', cartoes, 'finance_cartoes');
     }
 
     async carregarCartoes() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_cartoes')) || [];
-        }
-
-        try {
-            const { data, error } = await this.supabase
-                .from('cartoes')
-                .select('*')
-                .eq('user_id', this.userId)
-                .order('timestamp', { ascending: false });
-
-            if (error) throw error;
-
-            return data ? data.map(item => ({
-                id: item.id,
-                nome: item.nome,
-                limite: parseFloat(item.limite),
-                diaFechamento: item.dia_fechamento,
-                diaVencimento: item.dia_vencimento,
-                ativo: item.ativo,
-                timestamp: item.timestamp
-            })) : [];
-        } catch (error) {
-            console.error('Erro ao carregar cartões:', error);
-            return JSON.parse(localStorage.getItem('finance_cartoes')) || [];
-        }
+        return await this.carregarDados('cartoes', 'finance_cartoes', (item) => ({
+            id: item.id,
+            nome: item.nome,
+            limite: parseFloat(item.limite),
+            diaFechamento: item.dia_fechamento,
+            diaVencimento: item.dia_vencimento,
+            ativo: item.ativo,
+            timestamp: item.timestamp
+        }));
     }
 
-    // Métodos para compras no cartão
     async salvarComprasCartao(comprasCartao) {
-        if (!this.supabase) {
-            localStorage.setItem('finance_comprasCartao', JSON.stringify(comprasCartao));
-            return;
-        }
-
-        try {
-            await this.supabase
-                .from('compras_cartao')
-                .delete()
-                .eq('user_id', this.userId);
-
-            const comprasComUserId = comprasCartao.map(compra => ({
-                id: compra.id,
-                cartao_id: compra.cartaoId,
-                descricao: compra.descricao,
-                valor: compra.valor,
-                categoria: compra.categoria,
-                parcelas: compra.parcelas,
-                parcelas_pagas: compra.parcelasPagas,
-                data_compra: compra.dataCompra,
-                ativa: compra.ativa,
-                timestamp: compra.timestamp,
-                user_id: this.userId
-            }));
-
-            const { error } = await this.supabase
-                .from('compras_cartao')
-                .insert(comprasComUserId);
-
-            if (error) throw error;
-            console.log('✅ Compras cartão salvas no Supabase');
-        } catch (error) {
-            console.error('Erro ao salvar compras cartão:', error);
-            localStorage.setItem('finance_comprasCartao', JSON.stringify(comprasCartao));
-        }
+        return await this.salvarDados('compras_cartao', comprasCartao, 'finance_comprasCartao');
     }
 
     async carregarComprasCartao() {
-        if (!this.supabase) {
-            return JSON.parse(localStorage.getItem('finance_comprasCartao')) || [];
-        }
-
-        try {
-            const { data, error } = await this.supabase
-                .from('compras_cartao')
-                .select('*')
-                .eq('user_id', this.userId)
-                .order('timestamp', { ascending: false });
-
-            if (error) throw error;
-
-            return data ? data.map(item => ({
-                id: item.id,
-                cartaoId: item.cartao_id,
-                descricao: item.descricao,
-                valor: parseFloat(item.valor),
-                categoria: item.categoria,
-                parcelas: item.parcelas,
-                parcelasPagas: item.parcelas_pagas,
-                dataCompra: item.data_compra,
-                ativa: item.ativa,
-                timestamp: item.timestamp
-            })) : [];
-        } catch (error) {
-            console.error('Erro ao carregar compras cartão:', error);
-            return JSON.parse(localStorage.getItem('finance_comprasCartao')) || [];
-        }
+        return await this.carregarDados('compras_cartao', 'finance_comprasCartao', (item) => ({
+            id: item.id,
+            cartaoId: item.cartao_id,
+            descricao: item.descricao,
+            valor: parseFloat(item.valor),
+            categoria: item.categoria,
+            parcelas: item.parcelas,
+            parcelasPagas: item.parcelas_pagas,
+            dataCompra: item.data_compra,
+            ativa: item.ativa,
+            timestamp: item.timestamp
+        }));
     }
 
-    // Método para verificar conexão
-    async testarConexao() {
-        if (!this.supabase) return false;
-        
+    async salvarDados(tabela, dados, chaveLocalStorage) {
+        // Salva primeiro no localStorage para garantir
         try {
-            const { error } = await this.supabase
-                .from('gastos')
-                .select('count')
-                .limit(1);
-            
-            return !error;
+            localStorage.setItem(chaveLocalStorage, JSON.stringify(dados));
         } catch (error) {
+            console.error(`❌ Erro salvando no localStorage:`, error);
+        }
+
+        const isInitialized = await this.waitForInitialization();
+        
+        if (!isInitialized || !this.supabase) {
+            console.log(`📱 Offline: ${tabela} salvo localmente`);
+            return false;
+        }
+
+        try {
+            console.log(`💾 Tentando salvar ${dados.length} ${tabela} no Supabase...`);
+            
+            // Remove dados antigos
+            const { error: deleteError } = await this.supabase
+                .from(tabela)
+                .delete()
+                .eq('user_id', this.userId);
+
+            if (deleteError) throw deleteError;
+
+            // Prepara dados para inserção
+            const dadosParaInserir = dados.map(item => {
+                const dadosFormatados = { ...item, user_id: this.userId };
+                
+                // Remove propriedades undefined
+                Object.keys(dadosFormatados).forEach(key => {
+                    if (dadosFormatados[key] === undefined) {
+                        delete dadosFormatados[key];
+                    }
+                });
+                
+                return dadosFormatados;
+            });
+
+            // Insere novos dados
+            const { error: insertError } = await this.supabase
+                .from(tabela)
+                .insert(dadosParaInserir);
+
+            if (insertError) throw insertError;
+
+            console.log(`✅ ${dados.length} ${tabela} salvos no Supabase`);
+            return true;
+            
+        } catch (error) {
+            console.error(`❌ Erro ao salvar ${tabela} no Supabase:`, error);
             return false;
         }
     }
@@ -494,6 +400,65 @@ class FinanceApp {
             console.error('Erro ao carregar dados:', error);
             this.inicializarApp();
         });
+    }
+
+    // ========== NOVO MÉTODO: Carregamento Corrigido ==========
+    async carregarTodosDados() {
+        console.log('📦 Iniciando carregamento de dados...');
+        
+        // **CARREGA TODOS OS DADOS DO BANCO PRIMEIRO**
+        const [
+            gastos, 
+            ganhos, 
+            pessoas, 
+            recorrentes, 
+            cartoes, 
+            comprasCartao
+        ] = await Promise.all([
+            this.db.carregarGastos(),
+            this.db.carregarGanhos(),
+            this.db.carregarPessoas(),
+            this.db.carregarRecorrentes(),
+            this.db.carregarCartoes(),
+            this.db.carregarComprasCartao()
+        ]);
+
+        // **ATUALIZA OS ARRAYS COM DADOS DO BANCO**
+        this.gastos = gastos;
+        this.ganhos = ganhos;
+        this.pessoas = pessoas;
+        this.recorrentes = recorrentes;
+        this.cartoes = cartoes;
+        this.comprasCartao = comprasCartao;
+
+        console.log('✅ Dados carregados do banco:', {
+            gastos: this.gastos.length,
+            ganhos: this.ganhos.length,
+            pessoas: this.pessoas.length,
+            recorrentes: this.recorrentes.length,
+            cartoes: this.cartoes.length,
+            comprasCartao: this.comprasCartao.length
+        });
+    }
+
+    // ========== NOVO MÉTODO: Status do Carregamento ==========
+    mostrarStatusCarregamento() {
+        const totalDados = this.gastos.length + this.ganhos.length + this.pessoas.length + 
+                          this.recorrentes.length + this.cartoes.length + this.comprasCartao.length;
+        
+        if (totalDados > 0) {
+            this.mostrarToast(`✅ Dados carregados: ${totalDados} itens`, 'success');
+        } else {
+            this.mostrarToast('📝 Nenhum dado encontrado. Comece adicionando transações!', 'info');
+        }
+    }
+
+    // ========== NOVO MÉTODO: Forçar Recarregamento ==========
+    async recarregarDoBanco() {
+        console.log('🔄 Forçando recarregamento do banco...');
+        await this.carregarTodosDados();
+        this.refreshCompleto();
+        this.mostrarToast('Dados atualizados do banco!', 'success');
     }
 
     async carregarTodosDados() {
@@ -534,8 +499,12 @@ class FinanceApp {
     }
 
     inicializarApp() {
-        console.log('✅ Inicializando sistema...');
+        console.log('✅ Inicializando interface...');
+        
+        // Configura eventos primeiro
         this.configurarEventos();
+        
+        // **ATUALIZA A INTERFACE COM OS DADOS CARREGADOS**
         this.atualizarDashboard();
         this.atualizarListaTransacoes();
         this.atualizarListaPessoas();
@@ -546,7 +515,8 @@ class FinanceApp {
         this.carregarSelectCartoes();
         this.configurarDataAtual();
         this.carregarFiltros();
-        console.log('✅ Sistema inicializado com sucesso!');
+        
+        console.log('✅ Sistema totalmente inicializado!');
     }
 
     // ========== MÉTODO ADICIONADO PARA CORRIGIR O ERRO ==========
@@ -2988,8 +2958,8 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Forçar atualização de versão
-const VERSION_ATUAL = '5.0';
+const VERSION_ATUAL = '5.1'; // Mude para 5.1
 if (localStorage.getItem('app_version') !== VERSION_ATUAL) {
     localStorage.setItem('app_version', VERSION_ATUAL);
-    console.log('🆕 Nova versão instalada!');
+    console.log('🆕 Nova versão 5.1 instalada!');
 }
