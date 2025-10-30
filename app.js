@@ -1281,8 +1281,17 @@ class FinanceApp {
             this.recorrentes.push(recorrente);
             this.mostrarToast('Recorrente adicionado!', 'success');
             
-            // Gera transação para o mês atual
-            this.gerarTransacaoRecorrente(recorrente);
+            console.log('🔍 DEBUG: Novo recorrente criado:', recorrente);
+            
+            // CORREÇÃO: Fluxo correto para geração de transações
+            if (recorrente.responsavel !== 'Eu' && recorrente.tipo === 'parcelado') {
+                console.log(`🔍 DEBUG: Gerando ${recorrente.parcelas} parcelas para ${recorrente.responsavel}`);
+                await this.gerarTransacoesRecorrenteParceladas(recorrente);
+            } else if (recorrente.responsavel === 'Eu') {
+                // Para "Eu", gera apenas a transação do mês atual
+                console.log(`🔍 DEBUG: Gerando transação única para "Eu"`);
+                await this.gerarTransacaoRecorrente(recorrente);
+            }
         }
 
         await this.db.salvarRecorrentes(this.recorrentes);
@@ -1396,7 +1405,7 @@ class FinanceApp {
         setText('previsao-tres-meses', this.formatarMoeda(previsaoTresMeses));
     }
 
-    // REGRA 1: Gerar transação para recorrente do "EU"
+    // Ajuste este método para não gerar duplicatas com o novo sistema
     async gerarTransacaoRecorrente(recorrente) {
         const hoje = new Date();
         const dataInicio = new Date(recorrente.dataInicio);
@@ -2317,6 +2326,7 @@ class FinanceApp {
     // REGRA 5: Gera recorrente para compras de outras pessoas (mantém original)
     // CORREÇÃO 2: Recorrente para compras parceladas de outras pessoas
     // CORREÇÃO 2: Recorrente para compras parceladas de outras pessoas
+    // CORREÇÃO 2: Recorrente para compras parceladas de outras pessoas
     async gerarRecorrenteParaCompra(compra) {
         const recorrenteExistente = this.recorrentes.find(r => 
             r.descricao === `💳 ${compra.descricao}` &&
@@ -2341,7 +2351,7 @@ class FinanceApp {
             this.recorrentes.push(novoRecorrente);
             await this.db.salvarRecorrentes(this.recorrentes);
             
-            // CORREÇÃO: Gera GASTOS a receber para TODAS as parcelas futuras
+            // CORREÇÃO: Gera TODAS as parcelas do recorrente
             await this.gerarTransacoesRecorrenteParceladas(novoRecorrente);
             
             this.mostrarToast(`${compra.parcelas} parcelas criadas para receber de ${compra.responsavel}!`, 'success');
@@ -2410,39 +2420,43 @@ class FinanceApp {
     }
 
     // CORREÇÃO: Gera GASTOS a receber (não ganhos) para as parcelas futuras
+    // CORREÇÃO: Gera TODAS as parcelas do recorrente - teste
+    // VERSÃO SIMPLIFICADA PARA TESTE
     async gerarTransacoesRecorrenteParceladas(recorrente) {
+        console.log('🎯 MÉTODO CHAMADO! Parâmetro:', recorrente);
+        
+        // Garante que temos os dados necessários
+        if (!recorrente || !recorrente.parcelas) {
+            console.log('❌ Dados do recorrente incompletos');
+            return;
+        }
+        
+        console.log(`🎯 Criando ${recorrente.parcelas} parcelas...`);
+        
         for (let i = 1; i <= recorrente.parcelas; i++) {
             const dataRecebimento = this.calcularDataParcela(recorrente.dataInicio, i);
             
-            const gastoExistente = this.gastos.find(gasto => 
-                gasto.descricao === `💳 ${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})` &&
-                gasto.data === dataRecebimento &&
-                gasto.responsavel === recorrente.responsavel
-            );
+            const novoGasto = {
+                id: Math.floor(Date.now() + i * 1000),
+                descricao: `📅 ${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})`,
+                valor: recorrente.valor,
+                categoria: recorrente.categoria,
+                responsavel: recorrente.responsavel,
+                data: dataRecebimento,
+                pago: false,
+                tipo: 'gasto',
+                recorrenteId: recorrente.id,
+                parcelaNumero: i,
+                totalParcelas: recorrente.parcelas,
+                timestamp: new Date().toISOString()
+            };
             
-            if (!gastoExistente) {
-                const novoGasto = {
-                    id: Math.floor(Date.now() + Math.random() + i),
-                    descricao: `💳 ${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})`,
-                    valor: recorrente.valor, // Valor total por parcela
-                    categoria: recorrente.categoria,
-                    responsavel: recorrente.responsavel,
-                    data: dataRecebimento,
-                    pago: false, // CORREÇÃO: Inicia como não pago
-                    dataPagamento: null,
-                    tipo: 'gasto',
-                    recorrenteId: recorrente.id,
-                    parcelaNumero: i,
-                    totalParcelas: recorrente.parcelas,
-                    timestamp: new Date().toISOString()
-                };
-                
-                this.gastos.push(novoGasto);
-            }
+            this.gastos.push(novoGasto);
+            console.log(`✅ Parcela ${i} criada: ${novoGasto.descricao}`);
         }
         
         await this.db.salvarGastos(this.gastos);
-        this.mostrarToast(`${recorrente.parcelas} parcelas criadas para receber de ${recorrente.responsavel}!`, 'info');
+        console.log('✅ Todas as parcelas salvas no banco!');
     }
 
     // Método auxiliar para calcular data de vencimento da fatura
