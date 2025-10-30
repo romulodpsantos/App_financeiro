@@ -44,18 +44,17 @@ class DatabaseService {
         return false;
     }
 
-    // **MÉTODO CRÍTICO CORRIGIDO**: Sempre tenta carregar do banco primeiro
+    // **CORREÇÃO 3: Usa apenas Supabase, não localStorage**
     async carregarDados(tabela, chaveLocalStorage, mapearDados) {
         const isInitialized = await this.waitForInitialization();
         
-        // Se não conseguiu conectar, usa localStorage
         if (!isInitialized || !this.supabase) {
-            console.log(`📱 Offline: ${tabela} do localStorage`);
-            return this.getFromLocalStorage(chaveLocalStorage);
+            console.log(`❌ Supabase não disponível: ${tabela}`);
+            return [];
         }
 
         try {
-            console.log(`🔄 Tentando carregar ${tabela} do Supabase...`);
+            console.log(`🔄 Carregando ${tabela} do Supabase...`);
             
             const { data, error } = await this.supabase
                 .from(tabela)
@@ -67,58 +66,53 @@ class DatabaseService {
 
             if (data && data.length > 0) {
                 console.log(`✅ ${data.length} ${tabela} carregados do Supabase`);
-                
-                // **ATUALIZA O LOCALSTORAGE COM DADOS DO BANCO**
-                const dadosMapeados = data.map(mapearDados);
-                localStorage.setItem(chaveLocalStorage, JSON.stringify(dadosMapeados));
-                
-                return dadosMapeados;
+                return data.map(mapearDados);
             } else {
-                // Se não tem dados no banco, usa localStorage
-                console.log(`ℹ️ Nenhum ${tabela} no Supabase, usando localStorage`);
-                return this.getFromLocalStorage(chaveLocalStorage);
+                console.log(`ℹ️ Nenhum ${tabela} no Supabase`);
+                return [];
             }
             
         } catch (error) {
             console.error(`❌ Erro carregando ${tabela}:`, error);
-            return this.getFromLocalStorage(chaveLocalStorage);
-        }
-    }
-
-    getFromLocalStorage(chave) {
-        try {
-            return JSON.parse(localStorage.getItem(chave)) || [];
-        } catch (error) {
-            console.error(`❌ Erro parse ${chave}:`, error);
             return [];
         }
     }
 
     getUserId() {
-    // ⚠️ USER ID FIXO - mesmo em todos os navegadores ⚠️
-    const userIdFixo = 'user_app_financeiro_romulo';
-    
-    // Verifica se já existe
-    let userId = localStorage.getItem('user_id');
-    
-    if (!userId) {
-        userId = userIdFixo;
-        localStorage.setItem('user_id', userId);
-        console.log('👤 NOVO User ID criado:', userId);
-    } else if (userId !== userIdFixo) {
-        // Se existe mas é diferente, atualiza para o fixo
-        console.log('🔄 User ID diferente encontrado, atualizando para fixo:', userId, '→', userIdFixo);
-        userId = userIdFixo;
-        localStorage.setItem('user_id', userId);
-    }
-    
-    console.log('👤 User ID atual:', userId);
-    return userId;
+        const userIdFixo = 'user_app_financeiro_romulo';
+        let userId = localStorage.getItem('user_id');
+        
+        if (!userId) {
+            userId = userIdFixo;
+            localStorage.setItem('user_id', userId);
+        } else if (userId !== userIdFixo) {
+            userId = userIdFixo;
+            localStorage.setItem('user_id', userId);
+        }
+        
+        return userId;
     }
 
     // ========== MÉTODOS ESPECÍFICOS ==========
     async salvarGastos(gastos) {
-        return await this.salvarDados('gastos', gastos, 'finance_gastos');
+        return await this.salvarDadosComMapeamento('gastos', gastos, (gasto) => ({
+            id: Math.floor(gasto.id), // CORREÇÃO 1: Garante que é inteiro
+            descricao: gasto.descricao,
+            valor: gasto.valor,
+            categoria: gasto.categoria,
+            responsavel: gasto.responsavel,
+            data: gasto.data,
+            pago: gasto.pago,
+            data_pagamento: gasto.dataPagamento,
+            tipo: gasto.tipo,
+            recorrente_id: gasto.recorrenteId ? Math.floor(gasto.recorrenteId) : null,
+            parcela_numero: gasto.parcelaNumero,
+            total_parcelas: gasto.totalParcelas,
+            cartao_id: gasto.cartaoId ? Math.floor(gasto.cartaoId) : null,
+            compra_cartao_id: gasto.compraCartaoId ? Math.floor(gasto.compraCartaoId) : null,
+            timestamp: gasto.timestamp || new Date().toISOString(),
+            user_id: this.userId
+        }));
     }
 
     async carregarGastos() {
@@ -142,7 +136,17 @@ class DatabaseService {
     }
 
     async salvarGanhos(ganhos) {
-        return await this.salvarDados('ganhos', ganhos, 'finance_ganhos');
+        return await this.salvarDadosComMapeamento('ganhos', ganhos, (ganho) => ({
+            id: Math.floor(ganho.id),
+            descricao: ganho.descricao,
+            valor: ganho.valor,
+            data: ganho.data,
+            tipo: ganho.tipo,
+            origem: ganho.origem,
+            pessoa_origem: ganho.pessoaOrigem,
+            timestamp: ganho.timestamp || new Date().toISOString(),
+            user_id: this.userId
+        }));
     }
 
     async carregarGanhos() {
@@ -158,64 +162,46 @@ class DatabaseService {
         }));
     }
 
-    // **CORREÇÃO: Método salvarPessoas atualizado**
     async salvarPessoas(pessoas) {
         console.log('💾 SALVANDO PESSOAS:', pessoas);
-        
-        // Salva primeiro no localStorage
-        try {
-            localStorage.setItem('finance_pessoas', JSON.stringify(pessoas));
-            console.log('✅ Pessoas salvas no localStorage');
-        } catch (error) {
-            console.error('❌ Erro salvando pessoas no localStorage:', error);
-        }
 
         const isInitialized = await this.waitForInitialization();
         
         if (!isInitialized || !this.supabase) {
-            console.log('📱 Offline: pessoas salvas localmente');
+            console.log('❌ Supabase não disponível');
             return false;
         }
 
         try {
-            console.log(`💾 Tentando salvar ${pessoas.length} pessoas no Supabase...`);
+            console.log(`💾 Salvando ${pessoas.length} pessoas no Supabase...`);
             
-            // **CORREÇÃO 1: Remove TODAS as pessoas do user atual**
+            // Remove TODAS as pessoas do user atual
             const { error: deleteError } = await this.supabase
                 .from('pessoas')
                 .delete()
                 .eq('user_id', this.userId);
 
-            if (deleteError) {
-                console.error('❌ Erro ao deletar pessoas:', deleteError);
-                throw deleteError;
-            }
-            console.log('✅ Pessoas antigas removidas');
+            if (deleteError) throw deleteError;
 
-            // **CORREÇÃO 2: Usa IDs únicos baseados em timestamp**
+            // Usa IDs únicos baseados em timestamp
             const pessoasParaInserir = pessoas.map((nome, index) => ({
-                id: Date.now() + index, // ID único baseado em timestamp
+                id: Math.floor(Date.now() + index),
                 nome: nome,
                 user_id: this.userId
             }));
 
-            console.log('📤 Inserindo pessoas:', pessoasParaInserir);
-
             // Insere novas pessoas
-            const { data: insertData, error: insertError } = await this.supabase
+            const { error: insertError } = await this.supabase
                 .from('pessoas')
                 .insert(pessoasParaInserir);
 
-            if (insertError) {
-                console.error('❌ Erro ao inserir pessoas:', insertError);
-                throw insertError;
-            }
+            if (insertError) throw insertError;
 
-            console.log(`✅ ${pessoas.length} pessoas salvas no Supabase com sucesso!`);
+            console.log(`✅ ${pessoas.length} pessoas salvas no Supabase!`);
             return true;
             
         } catch (error) {
-            console.error('❌ Erro completo ao salvar pessoas:', error);
+            console.error('❌ Erro ao salvar pessoas:', error);
             return false;
         }
     }
@@ -224,42 +210,50 @@ class DatabaseService {
         const isInitialized = await this.waitForInitialization();
         
         if (!isInitialized || !this.supabase) {
-            console.log('📱 Offline: pessoas do localStorage');
-            return this.getFromLocalStorage('finance_pessoas');
+            console.log('❌ Supabase não disponível');
+            return [];
         }
 
         try {
-            console.log('🔄 Tentando carregar pessoas do Supabase...');
+            console.log('🔄 Carregando pessoas do Supabase...');
             
-            // **CORREÇÃO: Não usa timestamp para pessoas**
             const { data, error } = await this.supabase
                 .from('pessoas')
                 .select('*')
                 .eq('user_id', this.userId)
-                .order('id', { ascending: true }); // Ordena por ID
+                .order('id', { ascending: true });
 
             if (error) throw error;
 
             if (data && data.length > 0) {
                 console.log(`✅ ${data.length} pessoas carregadas do Supabase`);
-                
-                const nomes = data.map(item => item.nome);
-                localStorage.setItem('finance_pessoas', JSON.stringify(nomes));
-                
-                return nomes;
+                return data.map(item => item.nome);
             } else {
-                console.log('ℹ️ Nenhuma pessoa no Supabase, usando localStorage');
-                return this.getFromLocalStorage('finance_pessoas');
+                console.log('ℹ️ Nenhuma pessoa no Supabase');
+                return [];
             }
             
         } catch (error) {
             console.error('❌ Erro carregando pessoas:', error);
-            return this.getFromLocalStorage('finance_pessoas');
+            return [];
         }
     }
 
     async salvarRecorrentes(recorrentes) {
-        return await this.salvarDados('recorrentes', recorrentes, 'finance_recorrentes');
+        return await this.salvarDadosComMapeamento('recorrentes', recorrentes, (recorrente) => ({
+            id: Math.floor(recorrente.id),
+            descricao: recorrente.descricao,
+            valor: recorrente.valor,
+            categoria: recorrente.categoria,
+            tipo: recorrente.tipo,
+            parcelas: recorrente.parcelas,
+            parcelas_pagas: recorrente.parcelasPagas,
+            responsavel: recorrente.responsavel,
+            data_inicio: recorrente.dataInicio,
+            ativo: recorrente.ativo,
+            timestamp: recorrente.timestamp || new Date().toISOString(),
+            user_id: this.userId
+        }));
     }
 
     async carregarRecorrentes() {
@@ -279,7 +273,16 @@ class DatabaseService {
     }
 
     async salvarCartoes(cartoes) {
-        return await this.salvarDados('cartoes', cartoes, 'finance_cartoes');
+        return await this.salvarDadosComMapeamento('cartoes', cartoes, (cartao) => ({
+            id: Math.floor(cartao.id),
+            nome: cartao.nome,
+            limite: cartao.limite,
+            dia_fechamento: cartao.diaFechamento,
+            dia_vencimento: cartao.diaVencimento,
+            ativo: cartao.ativo,
+            timestamp: cartao.timestamp || new Date().toISOString(),
+            user_id: this.userId
+        }));
     }
 
     async carregarCartoes() {
@@ -295,7 +298,20 @@ class DatabaseService {
     }
 
     async salvarComprasCartao(comprasCartao) {
-        return await this.salvarDados('compras_cartao', comprasCartao, 'finance_comprasCartao');
+        return await this.salvarDadosComMapeamento('compras_cartao', comprasCartao, (compra) => ({
+            id: Math.floor(compra.id),
+            cartao_id: Math.floor(compra.cartaoId),
+            descricao: compra.descricao,
+            valor: compra.valor,
+            categoria: compra.categoria,
+            parcelas: compra.parcelas,
+            parcelas_pagas: compra.parcelasPagas,
+            data_compra: compra.dataCompra,
+            responsavel: compra.responsavel,
+            ativa: compra.ativa,
+            timestamp: compra.timestamp || new Date().toISOString(),
+            user_id: this.userId
+        }));
     }
 
     async carregarComprasCartao() {
@@ -308,30 +324,27 @@ class DatabaseService {
             parcelas: item.parcelas,
             parcelasPagas: item.parcelas_pagas,
             dataCompra: item.data_compra,
+            responsavel: item.responsavel,
             ativa: item.ativa,
             timestamp: item.timestamp
         }));
     }
 
-    async salvarDados(tabela, dados, chaveLocalStorage) {
-        // Salva primeiro no localStorage para garantir
-        try {
-            localStorage.setItem(chaveLocalStorage, JSON.stringify(dados));
-        } catch (error) {
-            console.error(`❌ Erro salvando no localStorage:`, error);
-        }
+    // ========== MÉTODO CORRIGIDO PARA SALVAR DADOS ==========
+    async salvarDadosComMapeamento(tabela, dados, mapearParaBanco) {
+        console.log(`💾 Salvando ${dados.length} ${tabela}...`);
 
         const isInitialized = await this.waitForInitialization();
         
         if (!isInitialized || !this.supabase) {
-            console.log(`📱 Offline: ${tabela} salvo localmente`);
+            console.log(`❌ Supabase não disponível`);
             return false;
         }
 
         try {
-            console.log(`💾 Tentando salvar ${dados.length} ${tabela} no Supabase...`);
+            console.log(`💾 Salvando ${dados.length} ${tabela} no Supabase...`);
             
-            // Remove dados antigos
+            // Remove dados antigos deste usuário
             const { error: deleteError } = await this.supabase
                 .from(tabela)
                 .delete()
@@ -339,19 +352,21 @@ class DatabaseService {
 
             if (deleteError) throw deleteError;
 
-            // Prepara dados para inserção
+            // Prepara dados para inserção com mapeamento correto
             const dadosParaInserir = dados.map(item => {
-                const dadosFormatados = { ...item, user_id: this.userId };
+                const dadosFormatados = mapearParaBanco(item);
                 
-                // Remove propriedades undefined
+                // Remove propriedades undefined/null para evitar erros
                 Object.keys(dadosFormatados).forEach(key => {
-                    if (dadosFormatados[key] === undefined) {
+                    if (dadosFormatados[key] === undefined || dadosFormatados[key] === null) {
                         delete dadosFormatados[key];
                     }
                 });
                 
                 return dadosFormatados;
             });
+
+            console.log(`📤 Inserindo ${dadosParaInserir.length} ${tabela}`);
 
             // Insere novos dados
             const { error: insertError } = await this.supabase
@@ -360,11 +375,11 @@ class DatabaseService {
 
             if (insertError) throw insertError;
 
-            console.log(`✅ ${dados.length} ${tabela} salvos no Supabase`);
+            console.log(`✅ ${dados.length} ${tabela} salvos no Supabase!`);
             return true;
             
         } catch (error) {
-            console.error(`❌ Erro ao salvar ${tabela} no Supabase:`, error);
+            console.error(`❌ Erro ao salvar ${tabela}:`, error);
             return false;
         }
     }
@@ -1205,6 +1220,9 @@ class FinanceApp {
     }
 
     // ========== CORREÇÃO 3: Recorrentes Parcelados para Outras Pessoas em 1x ==========
+    // ========== CORREÇÃO 3: Recorrentes para outras pessoas SEMPRE parcelados ==========
+    // ========== CORREÇÃO 1: Recorrentes para outras pessoas SEMPRE parcelados ==========
+    // ========== CORREÇÃO 1: Recorrentes para outras pessoas SEMPRE parcelados ==========
     async salvarRecorrente() {
         const id = document.getElementById('recorrenteId');
         const descricao = document.getElementById('descricaoRecorrente');
@@ -1227,22 +1245,20 @@ class FinanceApp {
 
         const recorrenteValor = parseFloat(valor.value);
         
-        // CORREÇÃO: Se for de outra pessoa, força tipo fixo e ignora parcelamento
+        // CORREÇÃO 1: Se for de outra pessoa, força tipo PARCELADO
         let tipoValue = tipo.value;
-        let parcelasValue = null;
+        let parcelasValue = tipo.value === 'parcelado' && parcelas ? parseInt(parcelas.value) : null;
         
         if (responsavel.value !== 'Eu') {
-            // Para outras pessoas, sempre fixo e 1 parcela
-            tipoValue = 'fixo';
-            parcelasValue = null;
-            this.mostrarToast('Para outras pessoas, o tipo será sempre "Fixo"', 'info');
-        } else if (tipo.value === 'parcelado' && parcelas) {
-            // Para "Eu" e parcelado, usa o valor informado
-            parcelasValue = parseInt(parcelas.value);
+            // Para outras pessoas, sempre PARCELADO
+            tipoValue = 'parcelado';
+            // Se não informou parcelas, usa 1 como padrão
+            parcelasValue = parcelasValue || 1;
+            this.mostrarToast('Para outras pessoas, o tipo será sempre "Parcelado"', 'info');
         }
 
         const recorrente = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+            id: Math.floor(Date.now()), // CORREÇÃO: Garante ID inteiro
             descricao: descricao.value,
             valor: recorrenteValor,
             categoria: categoria.value,
@@ -1265,15 +1281,8 @@ class FinanceApp {
             this.recorrentes.push(recorrente);
             this.mostrarToast('Recorrente adicionado!', 'success');
             
-            // REGRA 1: Se for do "EU", gera transação no mês atual
-            if (responsavel.value === 'Eu') {
-                this.gerarTransacaoRecorrente(recorrente);
-            }
-            
-            // REGRA 2: Se for de outra pessoa, atualiza o controle
-            if (responsavel.value !== 'Eu') {
-                this.atualizarDividaPessoa(recorrente);
-            }
+            // Gera transação para o mês atual
+            this.gerarTransacaoRecorrente(recorrente);
         }
 
         await this.db.salvarRecorrentes(this.recorrentes);
@@ -2154,6 +2163,9 @@ class FinanceApp {
     }
 
     // ========== COMPRAS NO CARTÃO ==========
+    // ========== CORREÇÃO 4 & 5: Compras no cartão - gera fatura unificada ==========
+    // ========== CORREÇÃO 2: Compras no cartão - gera fatura unificada ==========
+    // ========== CORREÇÃO 4 & 5: Compras no cartão - mantém as regras originais ==========
     async salvarCompraCartao() {
         const id = document.getElementById('compraCartaoId');
         const cartaoId = document.getElementById('cartaoCompra');
@@ -2162,8 +2174,9 @@ class FinanceApp {
         const categoria = document.getElementById('categoriaCompraCartao');
         const parcelas = document.getElementById('parcelasCompra');
         const dataCompra = document.getElementById('dataCompraCartao');
+        const responsavelCompra = document.getElementById('responsavelCompraCartao');
 
-        if (!cartaoId || !descricao || !valor || !categoria || !parcelas || !dataCompra) {
+        if (!cartaoId || !descricao || !valor || !categoria || !parcelas || !dataCompra || !responsavelCompra) {
             this.mostrarToast('Erro: Elementos do formulário não encontrados!', 'error');
             return;
         }
@@ -2174,7 +2187,7 @@ class FinanceApp {
         }
 
         const compra = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+            id: Math.floor(Date.now()), // CORREÇÃO: Garante ID inteiro
             cartaoId: parseInt(cartaoId.value),
             descricao: descricao.value,
             valor: parseFloat(valor.value),
@@ -2182,6 +2195,7 @@ class FinanceApp {
             parcelas: parseInt(parcelas.value),
             parcelasPagas: 0,
             dataCompra: dataCompra.value,
+            responsavel: responsavelCompra.value,
             ativa: true,
             timestamp: new Date().toISOString()
         };
@@ -2196,14 +2210,198 @@ class FinanceApp {
             this.comprasCartao.push(compra);
             this.mostrarToast('Compra adicionada!', 'success');
             
-            // REGRA 4: Gera transações de gasto para o cartão
-            await this.gerarTransacoesCartao(compra);
+            // REGRA 4: Gera apenas UMA transação unificada para a fatura
+            await this.gerarFaturaCartaoUnificada(compra);
+            
+            // REGRA 5: Se for de outra pessoa, gera recorrente a receber
+            if (compra.responsavel !== 'Eu') {
+                await this.gerarRecorrenteParaCompra(compra);
+            }
         }
 
         await this.db.salvarComprasCartao(this.comprasCartao);
         this.fecharModal('compraCartao');
         this.atualizarListaComprasCartao();
         this.atualizarListaCartoes();
+    }
+
+    // REGRA 4: Gera apenas UMA transação para a fatura do cartão (mantém original)
+    async gerarFaturaCartaoUnificada(compra) {
+        const cartao = this.cartoes.find(c => c.id === compra.cartaoId);
+        if (!cartao) return;
+
+        // Calcula data de vencimento da fatura
+        const dataVencimento = this.calcularDataVencimentoFatura(cartao, compra.dataCompra);
+        
+        // Verifica se já existe uma fatura para este cartão e mês
+        const faturaExistente = this.gastos.find(gasto => 
+            gasto.descricao === `💳 Fatura ${cartao.nome} - ${this.formatarMes(compra.dataCompra.substring(0, 7))}` &&
+            gasto.data === dataVencimento &&
+            gasto.cartaoId === compra.cartaoId &&
+            gasto.tipo === 'fatura_cartao'
+        );
+
+        if (faturaExistente) {
+            // Atualiza fatura existente
+            faturaExistente.valor += compra.valor;
+        } else {
+            // Cria nova fatura
+            const novaFatura = {
+                id: Math.floor(Date.now() + Math.random()), // CORREÇÃO: Garante ID inteiro
+                descricao: `💳 Fatura ${cartao.nome} - ${this.formatarMes(compra.dataCompra.substring(0, 7))}`,
+                valor: compra.valor,
+                categoria: 'outros',
+                responsavel: 'Eu',
+                data: dataVencimento,
+                pago: false,
+                dataPagamento: null,
+                tipo: 'fatura_cartao',
+                cartaoId: compra.cartaoId,
+                timestamp: new Date().toISOString()
+            };
+            this.gastos.push(novaFatura);
+        }
+
+        await this.db.salvarGastos(this.gastos);
+        this.mostrarToast('Fatura do cartão atualizada!', 'info');
+    }
+
+    // CORREÇÃO 2: Gera transações para TODAS as parcelas (não divide o valor)
+    async gerarTransacoesCartaoParceladas(compra) {
+        const cartao = this.cartoes.find(c => c.id === compra.cartaoId);
+        if (!cartao) return;
+
+        // Para cada parcela, gera uma transação com o valor TOTAL
+        for (let i = 1; i <= compra.parcelas; i++) {
+            const dataVencimento = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
+            
+            const gastoExistente = this.gastos.find(gasto => 
+                gasto.descricao === `💳 ${compra.descricao} (${i}/${compra.parcelas})` &&
+                gasto.data === dataVencimento &&
+                gasto.compraCartaoId === compra.id
+            );
+            
+            if (!gastoExistente) {
+                const novoGasto = {
+                    id: Math.floor(Date.now() + i), // CORREÇÃO: Garante ID inteiro
+                    descricao: `💳 ${compra.descricao} (${i}/${compra.parcelas})`,
+                    valor: compra.valor, // CORREÇÃO: Valor TOTAL, não dividido
+                    categoria: compra.categoria,
+                    responsavel: 'Eu',
+                    data: dataVencimento,
+                    pago: false,
+                    dataPagamento: null,
+                    tipo: 'gasto',
+                    cartaoId: compra.cartaoId,
+                    compraCartaoId: compra.id,
+                    parcelaNumero: i,
+                    totalParcelas: compra.parcelas,
+                    timestamp: new Date().toISOString()
+                };
+                
+                this.gastos.push(novoGasto);
+            }
+        }
+        
+        await this.db.salvarGastos(this.gastos);
+        this.mostrarToast(`${compra.parcelas} parcelas geradas para o cartão!`, 'info');
+    }
+
+
+    // CORREÇÃO 5: Gera recorrente para compras de outras pessoas
+    // CORREÇÃO 1: Gera recorrente para compras de outras pessoas
+    // REGRA 5: Gera recorrente para compras de outras pessoas (mantém original)
+    // CORREÇÃO 2: Recorrente para compras parceladas de outras pessoas
+    // CORREÇÃO 2: Recorrente para compras parceladas de outras pessoas
+    async gerarRecorrenteParaCompra(compra) {
+        const recorrenteExistente = this.recorrentes.find(r => 
+            r.descricao === `💳 ${compra.descricao}` &&
+            r.responsavel === compra.responsavel
+        );
+
+        if (!recorrenteExistente) {
+            const novoRecorrente = {
+                id: Math.floor(Date.now() + Math.random()),
+                descricao: `💳 ${compra.descricao}`,
+                valor: compra.valor, // Valor total da compra
+                categoria: compra.categoria,
+                tipo: 'parcelado',
+                parcelas: compra.parcelas, // CORREÇÃO: Usa o mesmo número de parcelas da compra
+                parcelasPagas: 0,
+                responsavel: compra.responsavel,
+                dataInicio: compra.dataCompra,
+                ativo: true,
+                timestamp: new Date().toISOString()
+            };
+
+            this.recorrentes.push(novoRecorrente);
+            await this.db.salvarRecorrentes(this.recorrentes);
+            
+            // CORREÇÃO: Gera GASTOS a receber para TODAS as parcelas futuras
+            await this.gerarTransacoesRecorrenteParceladas(novoRecorrente);
+            
+            this.mostrarToast(`${compra.parcelas} parcelas criadas para receber de ${compra.responsavel}!`, 'success');
+        }
+    }
+
+    // CORREÇÃO: Gera GASTOS a receber (não ganhos) para as parcelas futuras
+    async gerarTransacoesRecorrenteParceladas(recorrente) {
+        for (let i = 1; i <= recorrente.parcelas; i++) {
+            const dataRecebimento = this.calcularDataParcela(recorrente.dataInicio, i);
+            
+            const gastoExistente = this.gastos.find(gasto => 
+                gasto.descricao === `💳 ${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})` &&
+                gasto.data === dataRecebimento &&
+                gasto.responsavel === recorrente.responsavel
+            );
+            
+            if (!gastoExistente) {
+                const novoGasto = {
+                    id: Math.floor(Date.now() + Math.random() + i),
+                    descricao: `💳 ${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})`,
+                    valor: recorrente.valor, // Valor total por parcela
+                    categoria: recorrente.categoria,
+                    responsavel: recorrente.responsavel,
+                    data: dataRecebimento,
+                    pago: false, // CORREÇÃO: Inicia como não pago
+                    dataPagamento: null,
+                    tipo: 'gasto',
+                    recorrenteId: recorrente.id,
+                    parcelaNumero: i,
+                    totalParcelas: recorrente.parcelas,
+                    timestamp: new Date().toISOString()
+                };
+                
+                this.gastos.push(novoGasto);
+            }
+        }
+        
+        await this.db.salvarGastos(this.gastos);
+        this.mostrarToast(`${recorrente.parcelas} parcelas criadas para receber de ${recorrente.responsavel}!`, 'info');
+    }
+
+    // Método auxiliar para calcular data de vencimento da fatura
+    // Método auxiliar para calcular data de vencimento da fatura
+    calcularDataVencimentoFatura(cartao, dataCompra) {
+        const data = new Date(dataCompra);
+        const mesCompra = data.getMonth();
+        const anoCompra = data.getFullYear();
+        
+        // Próximo vencimento após a compra
+        let mesVencimento = mesCompra;
+        let anoVencimento = anoCompra;
+        
+        // Se a compra foi depois do fechamento, vai para o próximo mês
+        if (data.getDate() > cartao.diaFechamento) {
+            mesVencimento++;
+            if (mesVencimento > 11) {
+                mesVencimento = 0;
+                anoVencimento++;
+            }
+        }
+        
+        // Data de vencimento (usa o dia de vencimento do cartão)
+        return new Date(anoVencimento, mesVencimento, cartao.diaVencimento).toISOString().split('T')[0];
     }
 
     // REGRA 4: Gerar transações para compras no cartão
@@ -2465,12 +2663,21 @@ class FinanceApp {
     }
 
     // ========== ATUALIZAR MÉTODO PARA CALCULAR FATURAS FUTURAS ==========
+    // CORREÇÃO 2: Método para calcular previsão de faturas (valor total por parcela)
+    // CORREÇÃO 2: Método para calcular previsão de faturas (valor total por mês)
+    // CORREÇÃO 1: Próximas faturas com valores futuros
     calcularPrevisaoFaturas(cartaoId) {
         const hoje = new Date();
         const previsoes = [];
         const cartao = this.cartoes.find(c => c.id === cartaoId);
         
         if (!cartao) return previsoes;
+
+        // Busca TODAS as compras ativas do cartão
+        const comprasCartao = this.comprasCartao.filter(c => 
+            c.cartaoId === cartaoId && 
+            c.ativa
+        );
 
         // Calcula para os próximos 6 meses
         for (let i = 0; i < 6; i++) {
@@ -2480,31 +2687,14 @@ class FinanceApp {
             
             let total = 0;
             
-            // Calcula compras que estarão na fatura deste mês
-            const comprasCartao = this.comprasCartao.filter(c => 
-                c.cartaoId === cartaoId && 
-                c.ativa
-            );
-
+            // Para cada compra, verifica se tem parcela neste mês
             comprasCartao.forEach(compra => {
-                const dataCompra = new Date(compra.dataCompra);
-                
-                if (compra.parcelas === 1) {
-                    // COMPRA À VISTA: verifica se pertence a esta fatura
-                    if (this.compraPertenceAFaturaEspecifica(cartao, compra, mesData)) {
-                        total += compra.valor;
-                    }
-                } else {
-                    // COMPRA PARCELADA: calcula parcelas que vencem neste mês
-                    const valorParcela = compra.valor / compra.parcelas;
+                for (let parcela = 1; parcela <= compra.parcelas; parcela++) {
+                    const dataVencimento = this.calcularDataFaturaCartao(cartao, compra.dataCompra, parcela);
+                    const dataVenc = new Date(dataVencimento);
                     
-                    for (let parcela = 1; parcela <= compra.parcelas; parcela++) {
-                        const dataVencimento = this.calcularDataFaturaCartao(cartao, compra.dataCompra, parcela);
-                        const dataVenc = new Date(dataVencimento);
-                        
-                        if (dataVenc.getMonth() === mes && dataVenc.getFullYear() === ano) {
-                            total += valorParcela;
-                        }
+                    if (dataVenc.getMonth() === mes && dataVenc.getFullYear() === ano) {
+                        total += compra.valor; // CORREÇÃO: Valor total da compra
                     }
                 }
             });
@@ -2616,6 +2806,7 @@ class FinanceApp {
     carregarSelectPessoas() {
         const responsavelGasto = document.getElementById('responsavelGasto');
         const responsavelRecorrente = document.getElementById('responsavelRecorrente');
+        const responsavelCompraCartao = document.getElementById('responsavelCompraCartao');
         
         const options = '<option value="Eu">👤 Eu</option>' +
             this.pessoas.map(p => `<option value="${p}">👤 ${p}</option>`).join('');
@@ -2626,6 +2817,7 @@ class FinanceApp {
         if (responsavelRecorrente) {
             responsavelRecorrente.innerHTML = options;
         }
+        if (responsavelCompraCartao) responsavelCompraCartao.innerHTML = options;
     }
 
     mostrarConfirmacao(mensagem, callback) {
