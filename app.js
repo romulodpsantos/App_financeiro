@@ -2261,49 +2261,57 @@ class FinanceApp {
     }
 
     // ========== CORREÇÃO: Fatura Atual Incluindo Compras à Vista ==========
+    // ========== CORREÇÃO DEFINITIVA - FATURA ATUAL ==========
     calcularFaturaAtual(cartaoId) {
+        console.log(`🧮 Calculando fatura para cartão: ${cartaoId}`);
+        
         const hoje = new Date();
         const mesAtual = hoje.getMonth();
         const anoAtual = hoje.getFullYear();
         
-        const cartao = this.cartoes.find(c => c.id === cartaoId);
-        if (!cartao) return 0;
-
-        // Busca todas as compras do cartão (incluindo à vista)
-        const comprasCartao = this.comprasCartao.filter(c => 
-            c.cartaoId === cartaoId && 
-            c.ativa
+        console.log(`📅 Mês/Ano de referência: ${mesAtual + 1}/${anoAtual}`);
+        
+        // Busca TODOS os gastos do cartão
+        const todosGastosCartao = this.gastos.filter(gasto => 
+            gasto.cartaoId === cartaoId
         );
-
-        let totalFatura = 0;
-
-        comprasCartao.forEach(compra => {
-            const dataCompra = new Date(compra.dataCompra);
+        
+        console.log(`📋 Total de gastos do cartão: ${todosGastosCartao.length}`);
+        
+        // Filtra apenas os gastos PENDENTES do mês/ano atual
+        const gastosNaFatura = todosGastosCartao.filter(gasto => {
+            if (gasto.pago) {
+                console.log(`   ❌ ${gasto.descricao} - JÁ PAGO`);
+                return false;
+            }
             
-            // **CORREÇÃO: Para compras à vista (1x), verifica se pertencem à fatura atual**
-            if (compra.parcelas === 1) {
-                // COMPRA À VISTA: verifica se está na fatura atual
-                if (this.compraPertenceAFaturaAtual(cartao, compra, hoje)) {
-                    totalFatura += compra.valor;
-                    console.log(`💰 Compra à vista na fatura: ${compra.descricao} - ${this.formatarMoeda(compra.valor)}`);
-                }
-            } else {
-                // COMPRA PARCELADA: calcula valor das parcelas da fatura atual
-                const valorParcela = compra.valor / compra.parcelas;
+            if (!gasto.data) {
+                console.log(`   ❌ ${gasto.descricao} - SEM DATA`);
+                return false;
+            }
+            
+            try {
+                const dataVencimento = new Date(gasto.data + 'T00:00:00');
+                const mesmoMes = dataVencimento.getMonth() === mesAtual;
+                const mesmoAno = dataVencimento.getFullYear() === anoAtual;
                 
-                for (let i = 1; i <= compra.parcelas; i++) {
-                    const dataVencimentoParcela = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
-                    const dataVencimento = new Date(dataVencimentoParcela);
-                    
-                    if (dataVencimento.getMonth() === mesAtual && dataVencimento.getFullYear() === anoAtual) {
-                        totalFatura += valorParcela;
-                        console.log(`💳 Parcela na fatura: ${compra.descricao} (${i}/${compra.parcelas}) - ${this.formatarMoeda(valorParcela)}`);
-                    }
+                if (mesmoMes && mesmoAno) {
+                    console.log(`   ✅ ${gasto.descricao} - R$ ${gasto.valor} - ${gasto.data} - NA FATURA`);
+                    return true;
+                } else {
+                    console.log(`   ❌ ${gasto.descricao} - Venc: ${gasto.data} (Fora do mês atual)`);
+                    return false;
                 }
+            } catch (error) {
+                console.log(`   ❌ ${gasto.descricao} - ERRO NA DATA: ${gasto.data}`);
+                return false;
             }
         });
-
-        console.log(`🧮 Fatura atual do cartão ${cartaoId}: ${this.formatarMoeda(totalFatura)}`);
+        
+        const totalFatura = gastosNaFatura.reduce((sum, gasto) => sum + gasto.valor, 0);
+        
+        console.log(`💰 FATURA FINAL: ${gastosNaFatura.length} gastos | Total: R$ ${totalFatura.toFixed(2)}`);
+        
         return totalFatura;
     }
 
