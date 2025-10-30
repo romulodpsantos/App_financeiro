@@ -2220,6 +2220,10 @@ class FinanceApp {
         }
 
         await this.db.salvarComprasCartao(this.comprasCartao);
+
+        // CORREÇÃO: Sempre atualiza a fatura após salvar/editar compra
+        await this.atualizarFaturaCartao(compra.cartaoId);
+
         this.fecharModal('compraCartao');
         this.atualizarListaComprasCartao();
         this.atualizarListaCartoes();
@@ -2344,6 +2348,67 @@ class FinanceApp {
         }
     }
 
+    // CORREÇÃO: Método para atualizar a fatura do cartão baseado nas compras ativas
+    async atualizarFaturaCartao(cartaoId) {
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return;
+
+        // Busca todas as compras ativas do cartão
+        const comprasAtivas = this.comprasCartao.filter(c => 
+            c.cartaoId === cartaoId && 
+            c.ativa
+        );
+
+        // Calcula o valor total das compras ativas
+        const valorTotalFatura = comprasAtivas.reduce((total, compra) => total + compra.valor, 0);
+
+        // Busca a fatura existente para este cartão no mês atual
+        const hoje = new Date();
+        const mesAtual = hoje.getMonth();
+        const anoAtual = hoje.getFullYear();
+        
+        const faturaExistente = this.gastos.find(gasto => 
+            gasto.cartaoId === cartaoId && 
+            gasto.tipo === 'fatura_cartao' &&
+            gasto.data
+        );
+
+        if (faturaExistente) {
+            // Atualiza a fatura existente
+            faturaExistente.valor = valorTotalFatura;
+            
+            // Se não tem compras ativas, marca como pago (fatura zerada)
+            if (valorTotalFatura === 0) {
+                faturaExistente.pago = true;
+                faturaExistente.dataPagamento = new Date().toISOString().split('T')[0];
+            } else {
+                faturaExistente.pago = false;
+                faturaExistente.dataPagamento = null;
+            }
+        } else if (valorTotalFatura > 0) {
+            // Cria nova fatura apenas se houver valor
+            const dataVencimento = this.calcularDataVencimentoFatura(cartao, new Date().toISOString().split('T')[0]);
+            
+            const novaFatura = {
+                id: Math.floor(Date.now() + Math.random()),
+                descricao: `💳 Fatura ${cartao.nome} - ${this.formatarMes(hoje.toISOString().slice(0, 7))}`,
+                valor: valorTotalFatura,
+                categoria: 'outros',
+                responsavel: 'Eu',
+                data: dataVencimento,
+                pago: false,
+                dataPagamento: null,
+                tipo: 'fatura_cartao',
+                cartaoId: cartaoId,
+                timestamp: new Date().toISOString()
+            };
+            this.gastos.push(novaFatura);
+        }
+
+        await this.db.salvarGastos(this.gastos);
+        console.log(`✅ Fatura do cartão ${cartao.nome} atualizada: R$ ${valorTotalFatura}`);
+    }
+
     // CORREÇÃO: Gera GASTOS a receber (não ganhos) para as parcelas futuras
     async gerarTransacoesRecorrenteParceladas(recorrente) {
         for (let i = 1; i <= recorrente.parcelas; i++) {
@@ -2461,56 +2526,33 @@ class FinanceApp {
     // ========== CORREÇÃO: Fatura Atual Incluindo Compras à Vista ==========
     // ========== CORREÇÃO DEFINITIVA - FATURA ATUAL ==========
     calcularFaturaAtual(cartaoId) {
-        console.log(`🧮 Calculando fatura para cartão: ${cartaoId}`);
-        
+        // Busca a fatura do cartão para o mês atual
         const hoje = new Date();
         const mesAtual = hoje.getMonth();
         const anoAtual = hoje.getFullYear();
         
-        console.log(`📅 Mês/Ano de referência: ${mesAtual + 1}/${anoAtual}`);
-        
-        // Busca TODOS os gastos do cartão
-        const todosGastosCartao = this.gastos.filter(gasto => 
-            gasto.cartaoId === cartaoId
+        const faturaCartao = this.gastos.find(gasto => 
+            gasto.cartaoId === cartaoId && 
+            gasto.tipo === 'fatura_cartao' &&
+            !gasto.pago &&
+            gasto.data
         );
-        
-        console.log(`📋 Total de gastos do cartão: ${todosGastosCartao.length}`);
-        
-        // Filtra apenas os gastos PENDENTES do mês/ano atual
-        const gastosNaFatura = todosGastosCartao.filter(gasto => {
-            if (gasto.pago) {
-                console.log(`   ❌ ${gasto.descricao} - JÁ PAGO`);
-                return false;
-            }
-            
-            if (!gasto.data) {
-                console.log(`   ❌ ${gasto.descricao} - SEM DATA`);
-                return false;
-            }
-            
+
+        if (faturaCartao) {
             try {
-                const dataVencimento = new Date(gasto.data + 'T00:00:00');
+                const dataVencimento = new Date(faturaCartao.data + 'T00:00:00');
                 const mesmoMes = dataVencimento.getMonth() === mesAtual;
                 const mesmoAno = dataVencimento.getFullYear() === anoAtual;
                 
                 if (mesmoMes && mesmoAno) {
-                    console.log(`   ✅ ${gasto.descricao} - R$ ${gasto.valor} - ${gasto.data} - NA FATURA`);
-                    return true;
-                } else {
-                    console.log(`   ❌ ${gasto.descricao} - Venc: ${gasto.data} (Fora do mês atual)`);
-                    return false;
+                    return faturaCartao.valor;
                 }
             } catch (error) {
-                console.log(`   ❌ ${gasto.descricao} - ERRO NA DATA: ${gasto.data}`);
-                return false;
+                console.log(`Erro ao processar fatura: ${faturaCartao.descricao}`);
             }
-        });
+        }
         
-        const totalFatura = gastosNaFatura.reduce((sum, gasto) => sum + gasto.valor, 0);
-        
-        console.log(`💰 FATURA FINAL: ${gastosNaFatura.length} gastos | Total: R$ ${totalFatura.toFixed(2)}`);
-        
-        return totalFatura;
+        return 0;
     }
 
     // **CORREÇÃO: Método auxiliar para verificar se compra pertence à fatura atual**
@@ -2788,6 +2830,9 @@ class FinanceApp {
 
     async excluirCompraCartao(compraId) {
         this.mostrarConfirmacao('Excluir esta compra? Todas as parcelas serão removidas.', async () => {
+            const compra = this.comprasCartao.find(c => c.id === compraId);
+            const cartaoId = compra ? compra.cartaoId : null;
+            
             // Remove a compra
             this.comprasCartao = this.comprasCartao.filter(c => c.id !== compraId);
             // Remove as transações geradas por esta compra
@@ -2795,6 +2840,12 @@ class FinanceApp {
             
             await this.db.salvarComprasCartao(this.comprasCartao);
             await this.db.salvarGastos(this.gastos);
+            
+            // CORREÇÃO: Atualiza a fatura do cartão
+            if (cartaoId) {
+                await this.atualizarFaturaCartao(cartaoId);
+            }
+            
             this.atualizarListaComprasCartao();
             this.atualizarListaCartoes();
             this.refreshCompleto();
