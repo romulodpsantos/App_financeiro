@@ -2260,7 +2260,7 @@ class FinanceApp {
         return new Date(ano, mes, diaVencimento).toISOString().split('T')[0];
     }
 
-    // ========== CORREÇÃO 1: Fatura Atual Incluindo Compras à Vista ==========
+    // ========== CORREÇÃO: Fatura Atual Incluindo Compras à Vista ==========
     calcularFaturaAtual(cartaoId) {
         const hoje = new Date();
         const mesAtual = hoje.getMonth();
@@ -2279,31 +2279,59 @@ class FinanceApp {
 
         comprasCartao.forEach(compra => {
             const dataCompra = new Date(compra.dataCompra);
-            const mesCompra = dataCompra.getMonth();
-            const anoCompra = dataCompra.getFullYear();
-
-            // VERIFICA SE A COMPRA PERTENCE À FATURA ATUAL
-            if (this.compraPertenceAFaturaAtual(cartao, compra, hoje)) {
-                if (compra.parcelas === 1) {
-                    // COMPRA À VISTA: valor total na fatura atual
+            
+            // **CORREÇÃO: Para compras à vista (1x), verifica se pertencem à fatura atual**
+            if (compra.parcelas === 1) {
+                // COMPRA À VISTA: verifica se está na fatura atual
+                if (this.compraPertenceAFaturaAtual(cartao, compra, hoje)) {
                     totalFatura += compra.valor;
-                } else {
-                    // COMPRA PARCELADA: calcula valor das parcelas da fatura atual
-                    const valorParcela = compra.valor / compra.parcelas;
+                    console.log(`💰 Compra à vista na fatura: ${compra.descricao} - ${this.formatarMoeda(compra.valor)}`);
+                }
+            } else {
+                // COMPRA PARCELADA: calcula valor das parcelas da fatura atual
+                const valorParcela = compra.valor / compra.parcelas;
+                
+                for (let i = 1; i <= compra.parcelas; i++) {
+                    const dataVencimentoParcela = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
+                    const dataVencimento = new Date(dataVencimentoParcela);
                     
-                    for (let i = 1; i <= compra.parcelas; i++) {
-                        const dataVencimentoParcela = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
-                        const dataVencimento = new Date(dataVencimentoParcela);
-                        
-                        if (dataVencimento.getMonth() === mesAtual && dataVencimento.getFullYear() === anoAtual) {
-                            totalFatura += valorParcela;
-                        }
+                    if (dataVencimento.getMonth() === mesAtual && dataVencimento.getFullYear() === anoAtual) {
+                        totalFatura += valorParcela;
+                        console.log(`💳 Parcela na fatura: ${compra.descricao} (${i}/${compra.parcelas}) - ${this.formatarMoeda(valorParcela)}`);
                     }
                 }
             }
         });
 
+        console.log(`🧮 Fatura atual do cartão ${cartaoId}: ${this.formatarMoeda(totalFatura)}`);
         return totalFatura;
+    }
+
+    // **CORREÇÃO: Método auxiliar para verificar se compra pertence à fatura atual**
+    compraPertenceAFaturaAtual(cartao, compra, dataReferencia) {
+        const dataCompra = new Date(compra.dataCompra);
+        const diaFechamento = cartao.diaFechamento;
+        
+        // Data de fechamento atual
+        const dataFechamentoAtual = new Date(
+            dataReferencia.getFullYear(),
+            dataReferencia.getMonth(),
+            diaFechamento
+        );
+        
+        // Data de fechamento anterior
+        const dataFechamentoAnterior = new Date(
+            dataReferencia.getFullYear(),
+            dataReferencia.getMonth() - 1,
+            diaFechamento
+        );
+        
+        // **CORREÇÃO: Compra pertence à fatura atual se foi feita APÓS o fechamento anterior e ATÉ o fechamento atual**
+        const pertence = dataCompra > dataFechamentoAnterior && dataCompra <= dataFechamentoAtual;
+        
+        console.log(`📅 Compra ${compra.descricao}: ${dataCompra.toLocaleDateString()} | Fechamento: ${dataFechamentoAtual.toLocaleDateString()} | Pertence: ${pertence}`);
+        
+        return pertence;
     }
 
     compraPertenceAFaturaAtual(cartao, compra, dataReferencia) {
