@@ -1,14 +1,16 @@
 class FinanceApp {
     constructor() {
         console.log('🔄 SISTEMA INICIADO - Versão 4.0 - ' + new Date().toISOString());
-        
-        this.gastos = this.carregarDados('gastos') || [];
-        this.ganhos = this.carregarDados('ganhos') || [];
-        this.pessoas = this.carregarDados('pessoas') || [];
-        this.recorrentes = this.carregarDados('recorrentes') || [];
-        this.cartoes = this.carregarDados('cartoes') || [];
-        this.comprasCartao = this.carregarDados('comprasCartao') || [];
-        
+
+        this.datastore = new Datastore(window.neonClient);
+
+        this.gastos = [];
+        this.ganhos = [];
+        this.pessoas = [];
+        this.recorrentes = [];
+        this.cartoes = [];
+        this.comprasCartao = [];
+
         this.filtrosAtivos = {
             status: 'todos',
             pessoa: 'todos',
@@ -17,13 +19,41 @@ class FinanceApp {
         this.chartGastosGanhos = null;
         this.chartCategorias = null;
         this.chartEvolucao = null;
-        
-        this.inicializarApp();
     }
 
-    inicializarApp() {
+    // Busca os 6 conjuntos de dados na nuvem (Neon Data API) e popula os
+    // arrays em memória, no mesmo formato que o app sempre usou.
+    async carregarTudoDaNuvem() {
+        const [gastos, ganhos, pessoas, recorrentes, cartoes, comprasCartao] = await Promise.all([
+            this.datastore.listarTudo('gastos'),
+            this.datastore.listarTudo('ganhos'),
+            this.datastore.pessoasListar(),
+            this.datastore.listarTudo('recorrentes'),
+            this.datastore.listarTudo('cartoes'),
+            this.datastore.listarTudo('comprasCartao')
+        ]);
+        this.gastos = gastos;
+        this.ganhos = ganhos;
+        this.pessoas = pessoas;
+        this.recorrentes = recorrentes;
+        this.cartoes = cartoes;
+        this.comprasCartao = comprasCartao;
+    }
+
+    cloudEstaVazia() {
+        return this.gastos.length === 0 && this.ganhos.length === 0 && this.pessoas.length === 0 &&
+            this.recorrentes.length === 0 && this.cartoes.length === 0 && this.comprasCartao.length === 0;
+    }
+
+    async inicializarApp() {
         console.log('✅ Inicializando sistema...');
         this.configurarEventos();
+        await this.carregarTudoDaNuvem();
+
+        if (this.cloudEstaVazia() && !window.MigracaoLocalStorage.jaMigrouNesteNavegador() && window.MigracaoLocalStorage.temDadosLocais()) {
+            window.mostrarPromptMigracao(this);
+        }
+
         this.atualizarDashboard();
         this.atualizarListaTransacoes();
         this.atualizarListaPessoas();
@@ -168,7 +198,7 @@ class FinanceApp {
     }
 
     // ========== CRUD GASTOS ==========
-    salvarGasto() {
+    async salvarGasto() {
         const id = document.getElementById('gastoId');
         const descricao = document.getElementById('descricaoGasto');
         const valor = document.getElementById('valorGasto');
@@ -186,35 +216,31 @@ class FinanceApp {
             return;
         }
 
-        const gastoValor = parseFloat(valor.value);
-
-        const gasto = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+        const idExistente = id.value ? parseInt(id.value) : null;
+        const campos = {
             descricao: descricao.value,
-            valor: gastoValor,
+            valor: parseFloat(valor.value),
             categoria: categoria.value,
             responsavel: responsavel.value,
-            data: data.value,
-            pago: false,
-            dataPagamento: null,
-            tipo: 'gasto',
-            timestamp: new Date().toISOString()
+            data: data.value
         };
 
-        if (id.value) {
-            const index = this.gastos.findIndex(g => g.id === parseInt(id.value));
-            if (index !== -1) {
-                this.gastos[index] = { ...this.gastos[index], ...gasto };
+        try {
+            if (idExistente) {
+                const index = this.gastos.findIndex(g => g.id === idExistente);
+                const atualizado = await this.datastore.atualizar('gastos', idExistente, campos);
+                if (index !== -1 && atualizado) this.gastos[index] = { ...this.gastos[index], ...atualizado };
                 this.mostrarToast('Gasto atualizado!', 'success');
+            } else {
+                const criado = await this.datastore.criar('gastos', { ...campos, pago: false, dataPagamento: null });
+                this.gastos.push(criado);
+                this.mostrarToast('Gasto adicionado!', 'success');
             }
-        } else {
-            this.gastos.push(gasto);
-            this.mostrarToast('Gasto adicionado!', 'success');
+            this.fecharModal('gasto');
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
-
-        this.salvarDados('gastos', this.gastos);
-        this.fecharModal('gasto');
-        this.refreshCompleto();
     }
 
     editarGasto(gastoId) {
@@ -239,16 +265,20 @@ class FinanceApp {
     }
 
     excluirGasto(gastoId) {
-        this.mostrarConfirmacao('Excluir este gasto?', () => {
-            this.gastos = this.gastos.filter(g => g.id !== gastoId);
-            this.salvarDados('gastos', this.gastos);
-            this.refreshCompleto();
-            this.mostrarToast('Gasto excluído!', 'success');
+        this.mostrarConfirmacao('Excluir este gasto?', async () => {
+            try {
+                await this.datastore.remover('gastos', gastoId);
+                this.gastos = this.gastos.filter(g => g.id !== gastoId);
+                this.refreshCompleto();
+                this.mostrarToast('Gasto excluído!', 'success');
+            } catch (err) {
+                this.tratarErroPersistencia(err);
+            }
         });
     }
 
     // ========== CRUD GANHOS ==========
-    salvarGanho() {
+    async salvarGanho() {
         const id = document.getElementById('ganhoId');
         const descricao = document.getElementById('descricaoGanho');
         const valor = document.getElementById('valorGanho');
@@ -264,31 +294,25 @@ class FinanceApp {
             return;
         }
 
-        const ganhoValor = parseFloat(valor.value);
+        const idExistente = id.value ? parseInt(id.value) : null;
+        const campos = { descricao: descricao.value, valor: parseFloat(valor.value), data: data.value };
 
-        const ganho = {
-            id: id.value ? parseInt(id.value) : Date.now(),
-            descricao: descricao.value,
-            valor: ganhoValor,
-            data: data.value,
-            tipo: 'ganho',
-            timestamp: new Date().toISOString()
-        };
-
-        if (id.value) {
-            const index = this.ganhos.findIndex(g => g.id === parseInt(id.value));
-            if (index !== -1) {
-                this.ganhos[index] = { ...this.ganhos[index], ...ganho };
+        try {
+            if (idExistente) {
+                const index = this.ganhos.findIndex(g => g.id === idExistente);
+                const atualizado = await this.datastore.atualizar('ganhos', idExistente, campos);
+                if (index !== -1 && atualizado) this.ganhos[index] = { ...this.ganhos[index], ...atualizado };
                 this.mostrarToast('Ganho atualizado!', 'success');
+            } else {
+                const criado = await this.datastore.criar('ganhos', campos);
+                this.ganhos.push(criado);
+                this.mostrarToast('Ganho adicionado!', 'success');
             }
-        } else {
-            this.ganhos.push(ganho);
-            this.mostrarToast('Ganho adicionado!', 'success');
+            this.fecharModal('ganho');
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
-
-        this.salvarDados('ganhos', this.ganhos);
-        this.fecharModal('ganho');
-        this.refreshCompleto();
     }
 
     editarGanho(ganhoId) {
@@ -309,16 +333,20 @@ class FinanceApp {
     }
 
     excluirGanho(ganhoId) {
-        this.mostrarConfirmacao('Excluir este ganho?', () => {
-            this.ganhos = this.ganhos.filter(g => g.id !== ganhoId);
-            this.salvarDados('ganhos', this.ganhos);
-            this.refreshCompleto();
-            this.mostrarToast('Ganho excluído!', 'success');
+        this.mostrarConfirmacao('Excluir este ganho?', async () => {
+            try {
+                await this.datastore.remover('ganhos', ganhoId);
+                this.ganhos = this.ganhos.filter(g => g.id !== ganhoId);
+                this.refreshCompleto();
+                this.mostrarToast('Ganho excluído!', 'success');
+            } catch (err) {
+                this.tratarErroPersistencia(err);
+            }
         });
     }
 
     // ========== CRUD PESSOAS ==========
-    salvarPessoa() {
+    async salvarPessoa() {
         const id = document.getElementById('pessoaId');
         const nome = document.getElementById('nomePessoa');
 
@@ -334,23 +362,31 @@ class FinanceApp {
             return;
         }
 
-        if (id.value) {
-            const index = parseInt(id.value);
-            this.pessoas[index] = nomeValue;
-            this.mostrarToast('Pessoa atualizada!', 'success');
-        } else {
-            if (this.pessoas.includes(nomeValue)) {
-                this.mostrarToast('Pessoa já existe!', 'warning');
-                return;
+        try {
+            if (id.value) {
+                const index = parseInt(id.value);
+                const nomeAntigo = this.pessoas[index];
+                if (nomeAntigo !== nomeValue) {
+                    await this.datastore.pessoaRenomear(nomeAntigo, nomeValue);
+                    this.pessoas[index] = nomeValue;
+                }
+                this.mostrarToast('Pessoa atualizada!', 'success');
+            } else {
+                if (this.pessoas.includes(nomeValue)) {
+                    this.mostrarToast('Pessoa já existe!', 'warning');
+                    return;
+                }
+                await this.datastore.pessoaCriar(nomeValue);
+                this.pessoas.push(nomeValue);
+                this.mostrarToast('Pessoa adicionada!', 'success');
             }
-            this.pessoas.push(nomeValue);
-            this.mostrarToast('Pessoa adicionada!', 'success');
-        }
 
-        this.salvarDados('pessoas', this.pessoas);
-        this.carregarSelectPessoas();
-        this.fecharModal('pessoa');
-        this.refreshCompleto();
+            this.carregarSelectPessoas();
+            this.fecharModal('pessoa');
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
     }
 
     editarPessoa(index) {
@@ -378,25 +414,27 @@ class FinanceApp {
         }
     }
 
-    excluirPessoaEFluxo(index) {
+    async excluirPessoaEFluxo(index) {
         const nome = this.pessoas[index];
-        this.pessoas.splice(index, 1);
-        
-        this.gastos.forEach(gasto => {
-            if (gasto.responsavel === nome) {
-                gasto.responsavel = 'Eu';
-            }
-        });
+        const gastosAfetados = this.gastos.filter(g => g.responsavel === nome);
 
-        this.salvarDados('pessoas', this.pessoas);
-        this.salvarDados('gastos', this.gastos);
-        this.carregarSelectPessoas();
-        this.refreshCompleto();
-        this.mostrarToast('Pessoa excluída!', 'success');
+        try {
+            await this.datastore.pessoaRemover(nome);
+            await Promise.all(gastosAfetados.map(g => this.datastore.atualizar('gastos', g.id, { responsavel: 'Eu' })));
+
+            this.pessoas.splice(index, 1);
+            gastosAfetados.forEach(gasto => { gasto.responsavel = 'Eu'; });
+
+            this.carregarSelectPessoas();
+            this.refreshCompleto();
+            this.mostrarToast('Pessoa excluída!', 'success');
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
     }
 
     // ========== CRUD RECORRENTES ==========
-    salvarRecorrente() {
+    async salvarRecorrente() {
         const id = document.getElementById('recorrenteId');
         const descricao = document.getElementById('descricaoRecorrente');
         const valor = document.getElementById('valorRecorrente');
@@ -416,65 +454,62 @@ class FinanceApp {
             return;
         }
 
-        const recorrenteValor = parseFloat(valor.value);
         const parcelasValue = tipo.value === 'parcelado' && parcelas ? parseInt(parcelas.value) : null;
-
-        const recorrente = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+        const campos = {
             descricao: descricao.value,
-            valor: recorrenteValor,
+            valor: parseFloat(valor.value),
             categoria: categoria.value,
             tipo: tipo.value,
             parcelas: parcelasValue,
-            parcelasPagas: id.value ? this.recorrentes.find(r => r.id === parseInt(id.value))?.parcelasPagas || 0 : 0,
             responsavel: responsavel.value,
-            dataInicio: dataInicio.value,
-            ativo: true,
-            timestamp: new Date().toISOString()
+            dataInicio: dataInicio.value
         };
 
-        if (id.value) {
-            const index = this.recorrentes.findIndex(r => r.id === parseInt(id.value));
-            if (index !== -1) {
-                this.recorrentes[index] = { ...this.recorrentes[index], ...recorrente };
+        try {
+            if (id.value) {
+                const idExistente = parseInt(id.value);
+                const index = this.recorrentes.findIndex(r => r.id === idExistente);
+                const atualizado = await this.datastore.atualizar('recorrentes', idExistente, campos);
+                if (index !== -1 && atualizado) this.recorrentes[index] = { ...this.recorrentes[index], ...atualizado };
                 this.mostrarToast('Recorrente atualizado!', 'success');
-            }
-        } else {
-            this.recorrentes.push(recorrente);
-            this.mostrarToast('Recorrente adicionado!', 'success');
-            
-            // REGRA 1: Se for do "EU", gera transação no mês atual
-            if (responsavel.value === 'Eu') {
-                this.gerarTransacaoRecorrente(recorrente);
-            }
-            
-            // REGRA 2: Se for de outra pessoa, atualiza o controle
-            if (responsavel.value !== 'Eu') {
-                this.atualizarDividaPessoa(recorrente);
-            }
-        }
+            } else {
+                const criado = await this.datastore.criar('recorrentes', { ...campos, parcelasPagas: 0, ativo: true });
+                this.recorrentes.push(criado);
+                this.mostrarToast('Recorrente adicionado!', 'success');
 
-        this.salvarDados('recorrentes', this.recorrentes);
-        this.fecharModal('recorrente');
-        this.refreshCompleto();
+                // REGRA 1: Se for do "EU", gera transação no mês atual
+                if (responsavel.value === 'Eu') {
+                    await this.gerarTransacaoRecorrente(criado);
+                }
+
+                // REGRA 2: Se for de outra pessoa, atualiza o controle
+                if (responsavel.value !== 'Eu') {
+                    await this.atualizarDividaPessoa(criado);
+                }
+            }
+
+            this.fecharModal('recorrente');
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
     }
 
     // REGRA 1: Gerar transação para recorrente do "EU"
-    gerarTransacaoRecorrente(recorrente) {
+    async gerarTransacaoRecorrente(recorrente) {
         const hoje = new Date();
-        const dataInicio = new Date(recorrente.dataInicio);
-        
+        const dataInicio = this.parseDataLocal(recorrente.dataInicio);
+
         // Só gera transação se for do mês atual ou futuro
         if (dataInicio.getMonth() === hoje.getMonth() && dataInicio.getFullYear() === hoje.getFullYear()) {
-            const gastoExistente = this.gastos.find(gasto => 
-                gasto.descricao === recorrente.descricao && 
+            const gastoExistente = this.gastos.find(gasto =>
+                gasto.descricao === recorrente.descricao &&
                 gasto.data === recorrente.dataInicio &&
                 gasto.recorrenteId === recorrente.id
             );
-            
+
             if (!gastoExistente) {
-                const novoGasto = {
-                    id: Date.now() + Math.random(),
+                const novoGasto = await this.datastore.criar('gastos', {
                     descricao: recorrente.descricao,
                     valor: recorrente.valor,
                     categoria: recorrente.categoria,
@@ -482,50 +517,46 @@ class FinanceApp {
                     data: recorrente.dataInicio,
                     pago: false,
                     dataPagamento: null,
-                    tipo: 'gasto',
-                    recorrenteId: recorrente.id,
-                    timestamp: new Date().toISOString()
-                };
-                
+                    recorrenteId: recorrente.id
+                });
+
                 this.gastos.push(novoGasto);
-                this.salvarDados('gastos', this.gastos);
                 this.mostrarToast(`Gasto recorrente "${recorrente.descricao}" gerado!`, 'info');
             }
         }
     }
 
     // REGRA 2: Atualizar dívida da pessoa quando cadastrar recorrente parcelado
-    atualizarDividaPessoa(recorrente) {
+    async atualizarDividaPessoa(recorrente) {
         const pessoa = recorrente.responsavel;
         const pessoaIndex = this.pessoas.findIndex(p => p === pessoa);
-        
+
         if (pessoaIndex === -1) {
+            await this.datastore.pessoaCriar(pessoa);
             this.pessoas.push(pessoa);
-            this.salvarDados('pessoas', this.pessoas);
             this.carregarSelectPessoas();
         }
-        
+
         // Se for parcelado, já gera os gastos futuros
         if (recorrente.tipo === 'parcelado' && recorrente.parcelas) {
-            this.gerarGastosParceladosPessoa(recorrente);
+            await this.gerarGastosParceladosPessoa(recorrente);
         }
-        
+
         this.mostrarToast(`Dívida de ${pessoa} atualizada!`, 'info');
     }
 
-    gerarGastosParceladosPessoa(recorrente) {
+    async gerarGastosParceladosPessoa(recorrente) {
         for (let i = 1; i <= recorrente.parcelas; i++) {
             const dataParcela = this.calcularDataParcela(recorrente.dataInicio, i);
-            
-            const gastoExistente = this.gastos.find(gasto => 
+
+            const gastoExistente = this.gastos.find(gasto =>
                 gasto.descricao === `${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})` &&
                 gasto.data === dataParcela &&
                 gasto.recorrenteId === recorrente.id
             );
-            
+
             if (!gastoExistente) {
-                const gastoParcela = {
-                    id: Date.now() + Math.random() + i,
+                const gastoParcela = await this.datastore.criar('gastos', {
                     descricao: `${recorrente.descricao} (Parcela ${i}/${recorrente.parcelas})`,
                     valor: recorrente.valor,
                     categoria: recorrente.categoria,
@@ -533,18 +564,14 @@ class FinanceApp {
                     data: dataParcela,
                     pago: false,
                     dataPagamento: null,
-                    tipo: 'gasto',
                     recorrenteId: recorrente.id,
                     parcelaNumero: i,
-                    totalParcelas: recorrente.parcelas,
-                    timestamp: new Date().toISOString()
-                };
-                
+                    totalParcelas: recorrente.parcelas
+                });
+
                 this.gastos.push(gastoParcela);
             }
         }
-        
-        this.salvarDados('gastos', this.gastos);
     }
 
     editarRecorrente(recorrenteId) {
@@ -578,109 +605,114 @@ class FinanceApp {
     }
 
     excluirRecorrente(recorrenteId) {
-        this.mostrarConfirmacao('Excluir este recorrente?', () => {
-            this.recorrentes = this.recorrentes.filter(r => r.id !== recorrenteId);
-            this.salvarDados('recorrentes', this.recorrentes);
-            this.refreshCompleto();
-            this.mostrarToast('Recorrente excluído!', 'success');
+        this.mostrarConfirmacao('Excluir este recorrente?', async () => {
+            try {
+                await this.datastore.remover('recorrentes', recorrenteId);
+                this.recorrentes = this.recorrentes.filter(r => r.id !== recorrenteId);
+                this.refreshCompleto();
+                this.mostrarToast('Recorrente excluído!', 'success');
+            } catch (err) {
+                this.tratarErroPersistencia(err);
+            }
         });
     }
 
     // ========== TOGGLE STATUS RECORRENTE ==========
-    toggleRecorrenteAtivo(recorrenteId) {
+    async toggleRecorrenteAtivo(recorrenteId) {
         const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
-        if (recorrente) {
-            recorrente.ativo = !recorrente.ativo;
-            this.salvarDados('recorrentes', this.recorrentes);
+        if (!recorrente) return;
+        const novoAtivo = !recorrente.ativo;
+        try {
+            await this.datastore.atualizar('recorrentes', recorrenteId, { ativo: novoAtivo });
+            recorrente.ativo = novoAtivo;
             this.refreshCompleto();
             this.mostrarToast(`Recorrente ${recorrente.ativo ? 'ativado' : 'desativado'}!`, 'success');
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
     }
 
     // ========== PAGAMENTO PARCIAL/TOTAL DE PESSOAS ==========
-    marcarParcelaPaga(recorrenteId) {
+    async marcarParcelaPaga(recorrenteId) {
         const recorrente = this.recorrentes.find(r => r.id === recorrenteId);
-        if (recorrente && recorrente.parcelas) {
-            if (recorrente.parcelasPagas < recorrente.parcelas) {
-                recorrente.parcelasPagas++;
-                
-                const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas);
-                
-                // REGRA 4: Se for de outra pessoa, cria ganho apenas quando marcar como pago
-                if (recorrente.responsavel !== 'Eu') {
-                    const ganhoParcela = {
-                        id: Date.now(),
-                        descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
-                        valor: recorrente.valor,
-                        data: dataParcela,
-                        tipo: 'ganho',
-                        origem: 'pagamento_pessoa',
-                        pessoaOrigem: recorrente.responsavel,
-                        timestamp: new Date().toISOString()
-                    };
-                    this.ganhos.push(ganhoParcela);
-                    this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
-                } else {
-                    const gastoParcela = {
-                        id: Date.now(),
-                        descricao: `${recorrente.descricao} (Parcela ${recorrente.parcelasPagas}/${recorrente.parcelas})`,
-                        valor: recorrente.valor,
-                        categoria: recorrente.categoria,
-                        responsavel: recorrente.responsavel,
-                        data: dataParcela,
-                        pago: true,
-                        dataPagamento: new Date().toISOString().split('T')[0],
-                        tipo: 'gasto',
-                        recorrenteId: recorrente.id,
-                        timestamp: new Date().toISOString()
-                    };
-                    this.gastos.push(gastoParcela);
-                    this.mostrarToast('Parcela paga!', 'success');
-                }
+        if (!recorrente || !recorrente.parcelas || recorrente.parcelasPagas >= recorrente.parcelas) return;
 
-                if (recorrente.parcelasPagas === recorrente.parcelas) {
-                    recorrente.ativo = false;
-                }
+        const novaParcelasPagas = recorrente.parcelasPagas + 1;
+        const dataParcela = this.calcularDataParcela(recorrente.dataInicio, novaParcelasPagas);
+        const novoAtivo = novaParcelasPagas === recorrente.parcelas ? false : recorrente.ativo;
 
-                this.salvarDados('recorrentes', this.recorrentes);
-                this.salvarDados('gastos', this.gastos);
-                this.salvarDados('ganhos', this.ganhos);
-                this.refreshCompleto();
+        try {
+            await this.datastore.atualizar('recorrentes', recorrenteId, { parcelasPagas: novaParcelasPagas, ativo: novoAtivo });
+
+            // REGRA 4: Se for de outra pessoa, cria ganho apenas quando marcar como pago
+            if (recorrente.responsavel !== 'Eu') {
+                const ganhoParcela = await this.datastore.criar('ganhos', {
+                    descricao: `Pagamento de ${recorrente.responsavel} - ${recorrente.descricao} (Parcela ${novaParcelasPagas}/${recorrente.parcelas})`,
+                    valor: recorrente.valor,
+                    data: dataParcela,
+                    origem: 'pagamento_pessoa',
+                    pessoaOrigem: recorrente.responsavel
+                });
+                this.ganhos.push(ganhoParcela);
+                this.mostrarToast(`Recebido de ${recorrente.responsavel}!`, 'success');
+            } else {
+                const gastoParcela = await this.datastore.criar('gastos', {
+                    descricao: `${recorrente.descricao} (Parcela ${novaParcelasPagas}/${recorrente.parcelas})`,
+                    valor: recorrente.valor,
+                    categoria: recorrente.categoria,
+                    responsavel: recorrente.responsavel,
+                    data: dataParcela,
+                    pago: true,
+                    dataPagamento: new Date().toISOString().split('T')[0],
+                    recorrenteId: recorrente.id
+                });
+                this.gastos.push(gastoParcela);
+                this.mostrarToast('Parcela paga!', 'success');
             }
+
+            recorrente.parcelasPagas = novaParcelasPagas;
+            recorrente.ativo = novoAtivo;
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
     }
 
     // ========== PAGAMENTO PARCIAL DE GASTOS DE PESSOAS ==========
-    receberPagamentoParcial(gastoId, valorPago) {
+    async receberPagamentoParcial(gastoId, valorPago) {
         const gasto = this.gastos.find(g => g.id === gastoId);
-        if (gasto && gasto.responsavel !== 'Eu') {
-            const valorRestante = gasto.valor - valorPago;
-            
+        if (!gasto || gasto.responsavel === 'Eu') return;
+
+        const valorRestante = gasto.valor - valorPago;
+        const pago = valorRestante <= 0;
+        const dataHoje = new Date().toISOString().split('T')[0];
+        const camposGasto = pago ? { pago: true, dataPagamento: dataHoje } : { valor: valorRestante };
+
+        try {
             // REGRA 4: Cria ganho apenas quando marcar pagamento
-            const ganhoPagamento = {
-                id: Date.now(),
+            const ganhoPagamento = await this.datastore.criar('ganhos', {
                 descricao: `Pagamento de ${gasto.responsavel} - ${gasto.descricao}`,
                 valor: valorPago,
-                data: new Date().toISOString().split('T')[0],
-                tipo: 'ganho',
+                data: dataHoje,
                 origem: 'pagamento_pessoa',
-                pessoaOrigem: gasto.responsavel,
-                timestamp: new Date().toISOString()
-            };
+                pessoaOrigem: gasto.responsavel
+            });
             this.ganhos.push(ganhoPagamento);
-            
-            if (valorRestante <= 0) {
+
+            await this.datastore.atualizar('gastos', gastoId, camposGasto);
+
+            if (pago) {
                 gasto.pago = true;
-                gasto.dataPagamento = new Date().toISOString().split('T')[0];
+                gasto.dataPagamento = dataHoje;
                 this.mostrarToast(`Pagamento total recebido de ${gasto.responsavel}!`, 'success');
             } else {
                 gasto.valor = valorRestante;
                 this.mostrarToast(`Pagamento parcial de R$ ${valorPago.toFixed(2)} recebido!`, 'info');
             }
-            
-            this.salvarDados('gastos', this.gastos);
-            this.salvarDados('ganhos', this.ganhos);
+
             this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
     }
 
@@ -734,7 +766,7 @@ class FinanceApp {
     }
 
     calcularDataParcela(dataInicio, numeroParcela) {
-        const data = new Date(dataInicio);
+        const data = this.parseDataLocal(dataInicio);
         data.setMonth(data.getMonth() + (numeroParcela - 1));
         return data.toISOString().split('T')[0];
     }
@@ -767,21 +799,25 @@ class FinanceApp {
     }
 
     // ========== PAGAMENTOS ==========
-    marcarComoPago(gastoId) {
+    async marcarComoPago(gastoId) {
         const gasto = this.gastos.find(g => g.id === gastoId);
-        if (gasto) {
-            // REGRA 1 e 4: Só marca como pago quando clicar
-            if (gasto.responsavel !== 'Eu') {
-                this.mostrarModalPagamentoParcial(gastoId);
-                return;
-            }
-            
+        if (!gasto) return;
+
+        // REGRA 1 e 4: Só marca como pago quando clicar
+        if (gasto.responsavel !== 'Eu') {
+            this.mostrarModalPagamentoParcial(gastoId);
+            return;
+        }
+
+        const dataPagamento = new Date().toISOString().split('T')[0];
+        try {
+            await this.datastore.atualizar('gastos', gastoId, { pago: true, dataPagamento });
             gasto.pago = true;
-            gasto.dataPagamento = new Date().toISOString().split('T')[0];
+            gasto.dataPagamento = dataPagamento;
             this.mostrarToast('Gasto pago!', 'success');
-            
-            this.salvarDados('gastos', this.gastos);
             this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
         }
     }
 
@@ -927,8 +963,8 @@ class FinanceApp {
                 const parcelasRestantes = recorrente.parcelas - recorrente.parcelasPagas;
                 for (let i = 1; i <= parcelasRestantes; i++) {
                     const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas + i);
-                    const dataParcelaObj = new Date(dataParcela);
-                    
+                    const dataParcelaObj = this.parseDataLocal(dataParcela);
+
                     if (dataParcelaObj.getMonth() === mesProximo && dataParcelaObj.getFullYear() === anoProximo) {
                         totalProximoMes += recorrente.valor;
                     } else if (dataParcelaObj > proximoMes) {
@@ -1198,7 +1234,7 @@ class FinanceApp {
                 g.responsavel === pessoa && 
                 !g.pago
             ).filter(gasto => {
-                const dataGasto = new Date(gasto.data);
+                const dataGasto = this.parseDataLocal(gasto.data);
                 return dataGasto.getMonth() === mes && dataGasto.getFullYear() === ano;
             });
 
@@ -1214,7 +1250,7 @@ class FinanceApp {
                     const parcelasRestantes = recorrente.parcelas - recorrente.parcelasPagas;
                     for (let p = 1; p <= parcelasRestantes; p++) {
                         const dataParcela = this.calcularDataParcela(recorrente.dataInicio, recorrente.parcelasPagas + p);
-                        const dataParcelaObj = new Date(dataParcela);
+                        const dataParcelaObj = this.parseDataLocal(dataParcela);
                         if (dataParcelaObj.getMonth() === mes && dataParcelaObj.getFullYear() === ano) {
                             return true;
                         }
@@ -1470,7 +1506,7 @@ class FinanceApp {
     }
 
     // ========== CRUD CARTÕES ==========
-    salvarCartao() {
+    async salvarCartao() {
         const id = document.getElementById('cartaoId');
         const nome = document.getElementById('nomeCartao');
         const limite = document.getElementById('limiteCartao');
@@ -1487,31 +1523,32 @@ class FinanceApp {
             return;
         }
 
-        const cartao = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+        const campos = {
             nome: nome.value,
             limite: parseFloat(limite.value),
             diaFechamento: parseInt(diaFechamento.value),
-            diaVencimento: parseInt(diaVencimento.value),
-            ativo: true,
-            timestamp: new Date().toISOString()
+            diaVencimento: parseInt(diaVencimento.value)
         };
 
-        if (id.value) {
-            const index = this.cartoes.findIndex(c => c.id === parseInt(id.value));
-            if (index !== -1) {
-                this.cartoes[index] = { ...this.cartoes[index], ...cartao };
+        try {
+            if (id.value) {
+                const idExistente = parseInt(id.value);
+                const index = this.cartoes.findIndex(c => c.id === idExistente);
+                const atualizado = await this.datastore.atualizar('cartoes', idExistente, campos);
+                if (index !== -1 && atualizado) this.cartoes[index] = { ...this.cartoes[index], ...atualizado };
                 this.mostrarToast('Cartão atualizado!', 'success');
+            } else {
+                const criado = await this.datastore.criar('cartoes', campos);
+                this.cartoes.push(criado);
+                this.mostrarToast('Cartão adicionado!', 'success');
             }
-        } else {
-            this.cartoes.push(cartao);
-            this.mostrarToast('Cartão adicionado!', 'success');
-        }
 
-        this.salvarDados('cartoes', this.cartoes);
-        this.fecharModal('cartao');
-        this.atualizarListaCartoes();
-        this.carregarSelectCartoes();
+            this.fecharModal('cartao');
+            this.atualizarListaCartoes();
+            this.carregarSelectCartoes();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
     }
 
     carregarSelectCartoes() {
@@ -1543,21 +1580,25 @@ class FinanceApp {
     }
 
     excluirCartao(cartaoId) {
-        this.mostrarConfirmacao('Excluir este cartão? Todas as compras serão perdidas.', () => {
-            this.cartoes = this.cartoes.filter(c => c.id !== cartaoId);
-            // Remove também as compras deste cartão
-            this.comprasCartao = this.comprasCartao.filter(compra => compra.cartaoId !== cartaoId);
-            
-            this.salvarDados('cartoes', this.cartoes);
-            this.salvarDados('comprasCartao', this.comprasCartao);
-            this.atualizarListaCartoes();
-            this.atualizarListaComprasCartao();
-            this.mostrarToast('Cartão excluído!', 'success');
+        this.mostrarConfirmacao('Excluir este cartão? Todas as compras serão perdidas.', async () => {
+            try {
+                await this.datastore.remover('cartoes', cartaoId);
+                this.cartoes = this.cartoes.filter(c => c.id !== cartaoId);
+                // Remove também as compras deste cartão (a exclusão em cascata já
+                // acontece no banco; aqui é só espelhar em memória)
+                this.comprasCartao = this.comprasCartao.filter(compra => compra.cartaoId !== cartaoId);
+
+                this.atualizarListaCartoes();
+                this.atualizarListaComprasCartao();
+                this.mostrarToast('Cartão excluído!', 'success');
+            } catch (err) {
+                this.tratarErroPersistencia(err);
+            }
         });
     }
 
     // ========== COMPRAS NO CARTÃO ==========
-    salvarCompraCartao() {
+    async salvarCompraCartao() {
         const id = document.getElementById('compraCartaoId');
         const cartaoId = document.getElementById('cartaoCompra');
         const descricao = document.getElementById('descricaoCompraCartao');
@@ -1576,58 +1617,64 @@ class FinanceApp {
             return;
         }
 
-        const compra = {
-            id: id.value ? parseInt(id.value) : Date.now(),
+        const campos = {
             cartaoId: parseInt(cartaoId.value),
             descricao: descricao.value,
             valor: parseFloat(valor.value),
             categoria: categoria.value,
             parcelas: parseInt(parcelas.value),
-            parcelasPagas: 0,
-            dataCompra: dataCompra.value,
-            ativa: true,
-            timestamp: new Date().toISOString()
+            dataCompra: dataCompra.value
         };
 
-        if (id.value) {
-            const index = this.comprasCartao.findIndex(c => c.id === parseInt(id.value));
-            if (index !== -1) {
-                this.comprasCartao[index] = { ...this.comprasCartao[index], ...compra };
+        try {
+            if (id.value) {
+                const idExistente = parseInt(id.value);
+                const index = this.comprasCartao.findIndex(c => c.id === idExistente);
+                const atualizado = await this.datastore.atualizar('comprasCartao', idExistente, campos);
+                if (index !== -1 && atualizado) this.comprasCartao[index] = { ...this.comprasCartao[index], ...atualizado };
                 this.mostrarToast('Compra atualizada!', 'success');
-            }
-        } else {
-            this.comprasCartao.push(compra);
-            this.mostrarToast('Compra adicionada!', 'success');
-            
-            // REGRA 4: Gera transações de gasto para o cartão
-            this.gerarTransacoesCartao(compra);
-        }
+            } else {
+                const criada = await this.datastore.criar('comprasCartao', { ...campos, ativa: true });
+                this.comprasCartao.push(criada);
+                this.mostrarToast('Compra adicionada!', 'success');
 
-        this.salvarDados('comprasCartao', this.comprasCartao);
-        this.fecharModal('compraCartao');
-        this.atualizarListaComprasCartao();
-        this.atualizarListaCartoes();
+                // REGRA 4: Gera transações de gasto para o cartão
+                await this.gerarTransacoesCartao(criada);
+            }
+
+            this.fecharModal('compraCartao');
+            this.atualizarListaComprasCartao();
+            this.atualizarListaCartoes();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
     }
 
     // REGRA 4: Gerar transações para compras no cartão
-    gerarTransacoesCartao(compra) {
+    async gerarTransacoesCartao(compra) {
         const cartao = this.cartoes.find(c => c.id === compra.cartaoId);
         if (!cartao) return;
 
-        const valorParcela = compra.valor / compra.parcelas;
-        
+        // Divide o valor total em centavos inteiros para que as parcelas somem
+        // exatamente o valor da compra (evita erro de arredondamento em float,
+        // ex.: R$100 / 3 antes virava 33,33 + 33,33 + 33,33 = R$99,99).
+        const totalCentavos = Math.round(compra.valor * 100);
+        const parcelaBaseCentavos = Math.floor(totalCentavos / compra.parcelas);
+        const restoCentavos = totalCentavos - (parcelaBaseCentavos * compra.parcelas);
+
         for (let i = 1; i <= compra.parcelas; i++) {
+            // As primeiras `restoCentavos` parcelas recebem 1 centavo a mais
+            const valorParcela = (parcelaBaseCentavos + (i <= restoCentavos ? 1 : 0)) / 100;
             const dataVencimento = this.calcularDataFaturaCartao(cartao, compra.dataCompra, i);
-            
-            const gastoExistente = this.gastos.find(gasto => 
+
+            const gastoExistente = this.gastos.find(gasto =>
                 gasto.descricao === `💳 ${compra.descricao} (${i}/${compra.parcelas})` &&
                 gasto.data === dataVencimento &&
                 gasto.compraCartaoId === compra.id
             );
-            
+
             if (!gastoExistente) {
-                const novoGasto = {
-                    id: Date.now() + Math.random() + i,
+                const novoGasto = await this.datastore.criar('gastos', {
                     descricao: `💳 ${compra.descricao} (${i}/${compra.parcelas})`,
                     valor: valorParcela,
                     categoria: compra.categoria,
@@ -1635,31 +1682,38 @@ class FinanceApp {
                     data: dataVencimento,
                     pago: false,
                     dataPagamento: null,
-                    tipo: 'gasto',
                     cartaoId: compra.cartaoId,
                     compraCartaoId: compra.id,
                     parcelaNumero: i,
-                    totalParcelas: compra.parcelas,
-                    timestamp: new Date().toISOString()
-                };
-                
+                    totalParcelas: compra.parcelas
+                });
+
                 this.gastos.push(novoGasto);
             }
         }
-        
-        this.salvarDados('gastos', this.gastos);
+
         this.refreshCompleto();
     }
 
     calcularDataFaturaCartao(cartao, dataCompra, numeroParcela) {
-        const data = new Date(dataCompra);
-        data.setMonth(data.getMonth() + (numeroParcela - 1));
-        
+        const compra = this.parseDataLocal(dataCompra);
+        const diaCompra = compra.getDate();
+
+        // Se a compra foi feita depois do fechamento, ela só entra na fatura
+        // do mês seguinte ao da compra (regra real de cartão de crédito).
+        let mesBase = compra.getMonth();
+        if (diaCompra > cartao.diaFechamento) {
+            mesBase += 1;
+        }
+
+        // A partir do mês-base da 1ª parcela, soma os meses das parcelas seguintes
+        const dataFatura = new Date(compra.getFullYear(), mesBase + (numeroParcela - 1), 1);
+
         // Ajusta para o dia de vencimento do cartão
-        const ano = data.getFullYear();
-        const mes = data.getMonth();
+        const ano = dataFatura.getFullYear();
+        const mes = dataFatura.getMonth();
         const diaVencimento = Math.min(cartao.diaVencimento, new Date(ano, mes + 1, 0).getDate());
-        
+
         return new Date(ano, mes, diaVencimento).toISOString().split('T')[0];
     }
 
@@ -1702,6 +1756,9 @@ class FinanceApp {
                         ${this.gerarPrevisaoFaturasCartao(cartao.id)}
                     </div>
                     <div class="card-actions">
+                        <button class="btn-icon success" onclick="app.mostrarModalConferirOrcamento(${cartao.id})" title="Conferir orçamento da fatura em aberto">
+                            <i class="fas fa-scale-balanced"></i>
+                        </button>
                         <button class="btn-icon" onclick="app.editarCartao(${cartao.id})" title="Editar">
                             <i class="fas fa-edit"></i>
                         </button>
@@ -1734,7 +1791,7 @@ class FinanceApp {
 
         let total = 0;
         gastosCartao.forEach(gasto => {
-            const dataGasto = new Date(gasto.data);
+            const dataGasto = this.parseDataLocal(gasto.data);
             if (dataGasto.getMonth() === mesAtual && dataGasto.getFullYear() === anoAtual) {
                 total += gasto.valor;
             }
@@ -1754,13 +1811,100 @@ class FinanceApp {
 
         let total = 0;
         gastosCartao.forEach(gasto => {
-            const dataGasto = new Date(gasto.data);
+            const dataGasto = this.parseDataLocal(gasto.data);
             if (dataGasto.getMonth() === proximoMes.getMonth() && dataGasto.getFullYear() === proximoMes.getFullYear()) {
                 total += gasto.valor;
             }
         });
 
         return total;
+    }
+
+    // A qual mês de vencimento pertence uma compra feita hoje, dado o dia de
+    // fechamento do cartão — ou seja, qual fatura ainda está "em aberto"
+    // acumulando gastos neste momento.
+    obterVencimentoFaturaAberta(cartao) {
+        const hojeISO = new Date().toISOString().split('T')[0];
+        return this.calcularDataFaturaCartao(cartao, hojeISO, 1);
+    }
+
+    totalLancadoNaFaturaAberta(cartaoId) {
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return 0;
+        const dataFatura = this.parseDataLocal(this.obterVencimentoFaturaAberta(cartao));
+        return this.gastos
+            .filter(g => g.cartaoId === cartaoId && !g.pago)
+            .filter(g => {
+                const d = this.parseDataLocal(g.data);
+                return d.getMonth() === dataFatura.getMonth() && d.getFullYear() === dataFatura.getFullYear();
+            })
+            .reduce((soma, g) => soma + g.valor, 0);
+    }
+
+    // Compara o que já está lançado no app contra o valor que o app do banco
+    // mostra pra fatura ainda em aberto — só pra saber se o gasto real já
+    // fugiu do orçamento antes mesmo de a fatura fechar.
+    mostrarModalConferirOrcamento(cartaoId) {
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return;
+
+        const dataFatura = this.obterVencimentoFaturaAberta(cartao);
+        const totalLancado = this.totalLancadoNaFaturaAberta(cartaoId);
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(20,21,38,0.55); display: flex; align-items: center;
+            justify-content: center; z-index: 2000; padding: 20px; backdrop-filter: blur(6px);
+        `;
+        overlay.innerHTML = `
+            <div style="background: white; border-radius: 20px; max-width: 420px; width: 100%; padding: 22px;">
+                <h3 style="margin:0 0 16px;">📊 Conferir orçamento — ${cartao.nome}</h3>
+                <p style="color:#555; margin-bottom:16px; font-size:0.9em;">
+                    Fatura em aberto (vence ${this.formatarData(dataFatura)}). Você já tem
+                    <strong>${this.formatarMoeda(totalLancado)}</strong> lançado aqui até agora.
+                </p>
+                <div class="input-group">
+                    <label>Quanto o app do banco mostra de gasto até agora nessa fatura?</label>
+                    <input type="number" id="orcamentoValorBanco" step="0.01" min="0" value="${totalLancado.toFixed(2)}">
+                </div>
+                <div id="orcamentoResultado" style="display:none; margin-bottom:16px; padding:12px; border-radius:10px; font-size:0.9em;"></div>
+                <div style="display:flex; gap:10px;">
+                    <button id="orcamentoFechar" class="btn-outline" style="flex:1;">Fechar</button>
+                    <button id="orcamentoComparar" class="btn-primary" style="flex:1;">Comparar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#orcamentoFechar').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#orcamentoComparar').addEventListener('click', () => {
+            const valorBanco = parseFloat(overlay.querySelector('#orcamentoValorBanco').value);
+            const resultadoEl = overlay.querySelector('#orcamentoResultado');
+            resultadoEl.style.display = 'block';
+
+            if (isNaN(valorBanco)) {
+                resultadoEl.style.background = '#fee2e2';
+                resultadoEl.style.color = '#7f1d1d';
+                resultadoEl.textContent = 'Digite um valor válido.';
+                return;
+            }
+
+            const diferenca = valorBanco - totalLancado;
+            if (Math.abs(diferenca) < 0.01) {
+                resultadoEl.style.background = '#dcfce7';
+                resultadoEl.style.color = '#14532d';
+                resultadoEl.textContent = '✅ Tudo certo! O que você lançou bate com o banco.';
+            } else if (diferenca > 0) {
+                resultadoEl.style.background = '#fef3c7';
+                resultadoEl.style.color = '#78350f';
+                resultadoEl.textContent = `⚠️ Faltam ${this.formatarMoeda(diferenca)} pra lançar aqui (o banco mostra mais gasto do que você registrou).`;
+            } else {
+                resultadoEl.style.background = '#fee2e2';
+                resultadoEl.style.color = '#7f1d1d';
+                resultadoEl.textContent = `⚠️ Você tem ${this.formatarMoeda(Math.abs(diferenca))} a mais lançado do que o banco mostra — confira duplicidade.`;
+            }
+        });
     }
 
     gerarPrevisaoFaturasCartao(cartaoId) {
@@ -1798,7 +1942,7 @@ class FinanceApp {
                 g.cartaoId === cartaoId && 
                 !g.pago
             ).filter(gasto => {
-                const dataGasto = new Date(gasto.data);
+                const dataGasto = this.parseDataLocal(gasto.data);
                 return dataGasto.getMonth() === mes && dataGasto.getFullYear() === ano;
             });
 
@@ -1864,18 +2008,22 @@ class FinanceApp {
     }
 
     excluirCompraCartao(compraId) {
-        this.mostrarConfirmacao('Excluir esta compra? Todas as parcelas serão removidas.', () => {
-            // Remove a compra
-            this.comprasCartao = this.comprasCartao.filter(c => c.id !== compraId);
-            // Remove as transações geradas por esta compra
-            this.gastos = this.gastos.filter(g => g.compraCartaoId !== compraId);
-            
-            this.salvarDados('comprasCartao', this.comprasCartao);
-            this.salvarDados('gastos', this.gastos);
-            this.atualizarListaComprasCartao();
-            this.atualizarListaCartoes();
-            this.refreshCompleto();
-            this.mostrarToast('Compra excluída!', 'success');
+        this.mostrarConfirmacao('Excluir esta compra? Todas as parcelas serão removidas.', async () => {
+            try {
+                const gastosRelacionados = this.gastos.filter(g => g.compraCartaoId === compraId);
+                await Promise.all(gastosRelacionados.map(g => this.datastore.remover('gastos', g.id)));
+                await this.datastore.remover('comprasCartao', compraId);
+
+                this.comprasCartao = this.comprasCartao.filter(c => c.id !== compraId);
+                this.gastos = this.gastos.filter(g => g.compraCartaoId !== compraId);
+
+                this.atualizarListaComprasCartao();
+                this.atualizarListaCartoes();
+                this.refreshCompleto();
+                this.mostrarToast('Compra excluída!', 'success');
+            } catch (err) {
+                this.tratarErroPersistencia(err);
+            }
         });
     }
 
@@ -1928,6 +2076,19 @@ class FinanceApp {
         }, 3000);
     }
 
+    // Chamado no catch de toda operação que grava na nuvem (Neon Data API).
+    tratarErroPersistencia(err) {
+        console.error('Erro ao salvar na nuvem:', err);
+        this.mostrarToast(`Não foi possível salvar: ${err.message || 'erro desconhecido'}`, 'error');
+    }
+
+    mostrarModal(tipo) {
+        const modal = document.getElementById(`modal${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`);
+        if (modal) {
+            modal.style.display = 'block';
+        }
+    }
+
     fecharModal(tipo) {
         const modal = document.getElementById(`modal${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`);
         const form = document.getElementById(`form${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`);
@@ -1955,28 +2116,25 @@ class FinanceApp {
         this.refreshCompleto();
     }
 
-    // ========== PERSISTÊNCIA ==========
-    salvarDados(chave, dados) {
-        localStorage.setItem(`finance_${chave}`, JSON.stringify(dados));
-    }
-
-    carregarDados(chave) {
-        try {
-            return JSON.parse(localStorage.getItem(`finance_${chave}`));
-        } catch (error) {
-            console.error(`Erro ao carregar dados de ${chave}:`, error);
-            return null;
-        }
-    }
+    // Persistência: ver datastore.js (Neon Data API) e migracao.js (import
+    // do localStorage antigo). Os métodos salvarDados/carregarDados que
+    // existiam aqui foram substituídos na Fase 2 da reforma.
 
     // ========== FORMATAÇÃO ==========
     formatarMoeda(valor) {
         return 'R$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
     }
 
+    // Faz o parse de uma data "YYYY-MM-DD" como horário local, evitando o bug
+    // clássico de `new Date('YYYY-MM-DD')` ser interpretado como UTC e "voltar"
+    // um dia em fusos negativos como o do Brasil (UTC-3).
+    parseDataLocal(dataISO) {
+        return new Date(`${dataISO}T00:00:00`);
+    }
+
     formatarData(dataISO) {
         try {
-            return new Date(dataISO + 'T00:00:00').toLocaleDateString('pt-BR');
+            return this.parseDataLocal(dataISO).toLocaleDateString('pt-BR');
         } catch (error) {
             return dataISO;
         }
@@ -2200,11 +2358,11 @@ class FinanceApp {
     }
 }
 
-// Funções globais
+// Funções globais (wrappers finos que delegam para a instância, usados nos
+// atributos onclick do index.html)
 function mostrarModal(tipo) {
-    const modal = document.getElementById(`modal${tipo.charAt(0).toUpperCase() + tipo.slice(1)}`);
-    if (modal) {
-        modal.style.display = 'block';
+    if (window.app) {
+        window.app.mostrarModal(tipo);
     }
 }
 
@@ -2221,11 +2379,13 @@ function atualizarGraficos() {
     }
 }
 
-// Inicialização segura
-document.addEventListener('DOMContentLoaded', () => {
+// Inicialização segura — chamada pelo auth.js depois de confirmar o login
+// (ver Fase 1 do plano de reforma), em vez de rodar sozinha aqui.
+window.iniciarFinanceApp = async function iniciarFinanceApp() {
     console.log('🚀 Iniciando aplicação...');
     try {
         window.app = new FinanceApp();
+        await window.app.inicializarApp();
         console.log('✅ Aplicação inicializada com sucesso!');
     } catch (error) {
         console.error('❌ Erro ao inicializar aplicação:', error);
@@ -2239,7 +2399,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         }
     }
-});
+};
 
 // Forçar atualização de versão
 const VERSION_ATUAL = '4.0';

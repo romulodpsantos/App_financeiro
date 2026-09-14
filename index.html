@@ -6,6 +6,11 @@
     <title>Meu Controle Financeiro</title>
     <meta name="description" content="Controle suas finanças pessoais de forma simples e eficiente">
     
+    <!-- Fontes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
     <!-- CSS -->
     <link rel="stylesheet" href="style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -14,14 +19,62 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="app">
+    <!-- Tela de login/cadastro (Neon Auth) -->
+    <div id="authScreen" class="auth-screen" style="display:none;">
+        <div class="auth-card">
+            <h1>💰 Meu Dinheiro</h1>
+            <p class="auth-subtitulo">Seus dados financeiros, protegidos e sincronizados.</p>
+
+            <div class="auth-tabs">
+                <button type="button" id="tabEntrar" class="auth-tab active" onclick="alternarAbaAuth('entrar')">Entrar</button>
+                <button type="button" id="tabCriarConta" class="auth-tab" onclick="alternarAbaAuth('criar')">Criar conta</button>
+            </div>
+
+            <div id="authErro" class="auth-erro" style="display:none;"></div>
+
+            <form id="formEntrar" class="modal-form">
+                <div class="input-group">
+                    <label for="loginEmail">E-mail</label>
+                    <input type="email" id="loginEmail" required autocomplete="email">
+                </div>
+                <div class="input-group">
+                    <label for="loginSenha">Senha</label>
+                    <input type="password" id="loginSenha" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn-primary auth-btn">Entrar</button>
+            </form>
+
+            <form id="formCriarConta" class="modal-form" style="display:none;">
+                <div class="input-group">
+                    <label for="cadastroNome">Nome</label>
+                    <input type="text" id="cadastroNome" required autocomplete="name">
+                </div>
+                <div class="input-group">
+                    <label for="cadastroEmail">E-mail</label>
+                    <input type="email" id="cadastroEmail" required autocomplete="email">
+                </div>
+                <div class="input-group">
+                    <label for="cadastroSenha">Senha (mínimo 8 caracteres)</label>
+                    <input type="password" id="cadastroSenha" required minlength="8" autocomplete="new-password">
+                </div>
+                <button type="submit" class="btn-primary auth-btn">Criar conta</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="app" style="display:none;">
         <!-- Header -->
         <header class="header">
             <div class="header-content">
                 <h1>💰 Meu Dinheiro</h1>
-                <button class="btn-icon" id="btnConfig">
-                    <i class="fas fa-cog"></i>
-                </button>
+                <div class="header-actions">
+                    <button class="btn-icon" id="btnLogout" title="Sair">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                    <button class="btn-icon" id="btnConfig">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
             </div>
             <div class="saldo-total">
                 <span id="saldo">R$ 0,00</span>
@@ -203,6 +256,17 @@
                     </button>
                 </div>
                 
+                <div class="chart-card" style="margin-bottom: 18px;">
+                    <h3>🤖 Análise de dívidas com IA</h3>
+                    <p style="color: var(--gray); font-size: 0.9em; margin-bottom: 14px; text-align: center;">
+                        Peça pra Claude analisar sua situação e sugerir um plano pra sair das dívidas.
+                    </p>
+                    <button id="btnPedirAnaliseIA" class="btn-primary" style="width:100%;" onclick="pedirAnaliseIA()">
+                        🤖 Pedir análise e sugestões
+                    </button>
+                    <div id="analiseIAResultado" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);"></div>
+                </div>
+
                 <div class="charts-container">
                     <div class="chart-card">
                         <h3>Ganhos vs Gastos</h3>
@@ -241,9 +305,14 @@
             <div id="cards" class="tab-content">
                 <div class="section-header">
                     <h2>Cartões de Crédito</h2>
-                    <button class="btn-primary" onclick="mostrarModal('cartao')">
-                        <i class="fas fa-credit-card"></i> Novo Cartão
-                    </button>
+                    <div class="filter-actions">
+                        <button class="btn-outline" onclick="mostrarModalImportarFatura(app)">
+                            <i class="fas fa-file-import"></i> Importar Fatura
+                        </button>
+                        <button class="btn-primary" onclick="mostrarModal('cartao')">
+                            <i class="fas fa-credit-card"></i> Novo Cartão
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="cards-stats">
@@ -507,7 +576,16 @@
     <!-- Notificação Toast -->
     <div id="toast" class="toast"></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <script src="datastore.js"></script>
+    <script src="migracao.js"></script>
+    <script src="importador.js"></script>
+    <script src="analise-ia.js"></script>
     <script src="app.js"></script>
+    <script type="module" src="auth.js"></script>
 
     <!-- Modal Cartão -->
     <div id="modalCartao" class="modal">

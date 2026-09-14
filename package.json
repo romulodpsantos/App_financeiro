@@ -16,6 +16,9 @@
     ],
     "author": "Rômulo Santos",
     "license": "MIT",
+    "dependencies": {
+      "@anthropic-ai/sdk": "^0.125.0"
+    },
     "devDependencies": {
       "http-server": "^14.1.1"
     }
