@@ -23,12 +23,15 @@
 const BASE_NEON_AUTH = 'https://ep-cold-salad-acpa0axd.neonauth.sa-east-1.aws.neon.tech/financeiro/auth';
 
 module.exports = async function handler(req, res) {
-    const partesCaminho = Array.isArray(req.query.path) ? req.query.path : [];
-    console.log('[neonauth proxy] url=%s query=%j partesCaminho=%j', req.url, req.query, partesCaminho);
+    // A Vercel usa literalmente "...path" (com reticências) como chave da
+    // query para o segmento catch-all de api/neonauth/[...path].js — não
+    // "path" simples. Confirmado via log em produção depois do 404 misterioso.
+    const valorPath = req.query['...path'];
+    const partesCaminho = Array.isArray(valorPath) ? valorPath : (valorPath ? [valorPath] : []);
     const destino = new URL(`${BASE_NEON_AUTH}/${partesCaminho.join('/')}`);
 
     for (const [chave, valor] of Object.entries(req.query)) {
-        if (chave === 'path') continue;
+        if (chave === '...path') continue;
         for (const v of Array.isArray(valor) ? valor : [valor]) {
             destino.searchParams.append(chave, v);
         }
