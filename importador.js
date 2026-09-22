@@ -10,6 +10,19 @@
 //    frente (ex. pagamento da fatura anterior) — igual ao Nubank, esses
 //    créditos não são compra e ficam de fora do import.
 
+// Lê um arquivo como ArrayBuffer via FileReader (mais compatível que
+// File.arrayBuffer() em alguns navegadores mobile, principalmente Safari/iOS,
+// que já teve bugs devolvendo o buffer incompleto/corrompido pra arquivos
+// vindos do app Arquivos/iCloud).
+function lerArquivoComoArrayBuffer(arquivo) {
+    return new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onload = () => resolve(leitor.result);
+        leitor.onerror = () => reject(leitor.error || new Error('Falha ao ler o arquivo.'));
+        leitor.readAsArrayBuffer(arquivo);
+    });
+}
+
 // ---- Parsing de CSV (com suporte a campos entre aspas) ----
 function parseLinhaCSV(linha) {
     const campos = [];
@@ -159,6 +172,12 @@ function parseInterPDFLinhas(linhasTexto) {
 }
 
 async function parseInterPDF(arrayBuffer) {
+    const cabecalho = new Uint8Array(arrayBuffer.slice(0, 5));
+    const assinatura = String.fromCharCode(...cabecalho);
+    if (assinatura !== '%PDF-') {
+        throw new Error(`O arquivo não chegou como um PDF válido (${arrayBuffer.byteLength} byte(s) lidos). Tente escolher o arquivo de novo — em alguns celulares, arquivos do iCloud/Arquivos falham na primeira tentativa.`);
+    }
+
     const linhas = await extrairLinhasDoPDF(arrayBuffer);
     const resultado = parseInterPDFLinhas(linhas);
     if (resultado.transacoes.length === 0) {
@@ -300,7 +319,7 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
         try {
             let resultado;
             if (/\.pdf$/i.test(arquivo.name) || arquivo.type === 'application/pdf') {
-                const buffer = await arquivo.arrayBuffer();
+                const buffer = await lerArquivoComoArrayBuffer(arquivo);
                 resultado = await window.Importador.parseInterPDF(buffer);
             } else {
                 const texto = await arquivo.text();

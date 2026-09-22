@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/auth/:path*", "destination": "https://ep-cold-salad-acpa0axd.neonauth.sa-east-1.aws.neon.tech/financeiro/auth/:path*" },
+    { "source": "/api/data/:path*", "destination": "https://ep-cold-salad-acpa0axd.apirest.sa-east-1.aws.neon.tech/financeiro/rest/v1/:path*" }
+  ]
+}
