@@ -1,6 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/api/neonauth/(.*)", "destination": "/api/neonauth-handler?path=$1" },
-    { "source": "/api/data/(.*)", "destination": "/api/data-handler?path=$1" }
-  ]
-}
