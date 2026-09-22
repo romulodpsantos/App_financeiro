@@ -118,6 +118,12 @@ class FinanceApp {
             this.salvarCompraCartao();
         });
 
+        const formLancamentoRapido = document.getElementById('formLancamentoRapido');
+        if (formLancamentoRapido) formLancamentoRapido.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.processarLancamentoRapido();
+        });
+
         // Mostrar/ocultar campo de parcelas
         const tipoRecorrente = document.getElementById('tipoRecorrente');
         if (tipoRecorrente) {
@@ -199,6 +205,75 @@ class FinanceApp {
         }
     }
 
+    // ========== LANÇAMENTO RÁPIDO POR TEXTO ==========
+    // Entende frases como "Uber 23,50 hoje", "Mercado 150 15/09" ou só
+    // "Farmácia 42,90" (sem data = hoje). Não salva sozinho: abre o modal de
+    // gasto já preenchido pra o usuário conferir antes de confirmar.
+    interpretarLancamentoRapido(texto) {
+        let resto = texto.trim();
+        if (!resto) return null;
+
+        const hoje = new Date();
+        let data = hoje.toISOString().split('T')[0];
+
+        const regexData = /\b(hoje|ontem|anteontem|(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?)\b/i;
+        const matchData = resto.match(regexData);
+        if (matchData) {
+            const termo = matchData[1].toLowerCase();
+            if (termo === 'ontem') {
+                const d = new Date(hoje); d.setDate(d.getDate() - 1);
+                data = d.toISOString().split('T')[0];
+            } else if (termo === 'anteontem') {
+                const d = new Date(hoje); d.setDate(d.getDate() - 2);
+                data = d.toISOString().split('T')[0];
+            } else if (termo !== 'hoje') {
+                const dia = parseInt(matchData[2]);
+                const mes = parseInt(matchData[3]);
+                const anoBruto = matchData[4];
+                const ano = anoBruto ? (anoBruto.length === 2 ? 2000 + parseInt(anoBruto) : parseInt(anoBruto)) : hoje.getFullYear();
+                data = `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+            }
+            resto = (resto.slice(0, matchData.index) + resto.slice(matchData.index + matchData[0].length)).trim();
+        }
+
+        const regexValor = /R?\$?\s*(\d+(?:[.,]\d{1,2})?)/;
+        const matchValor = resto.match(regexValor);
+        if (!matchValor) return null;
+        const valor = parseFloat(matchValor[1].replace(',', '.'));
+        resto = (resto.slice(0, matchValor.index) + resto.slice(matchValor.index + matchValor[0].length)).trim();
+
+        const descricao = resto.replace(/\s+/g, ' ').trim();
+        if (!descricao || isNaN(valor) || valor <= 0) return null;
+
+        const categoria = window.Importador ? window.Importador.categorizarPorDescricao(descricao) : 'outros';
+
+        return { descricao, valor, data, categoria };
+    }
+
+    processarLancamentoRapido() {
+        const input = document.getElementById('lancamentoRapidoTexto');
+        if (!input || !input.value.trim()) return;
+
+        const interpretado = this.interpretarLancamentoRapido(input.value);
+        if (!interpretado) {
+            this.mostrarToast('Não entendi. Tente algo como "Uber 23,50 hoje".', 'error');
+            return;
+        }
+
+        mostrarModal('gasto');
+        const descricaoEl = document.getElementById('descricaoGasto');
+        const valorEl = document.getElementById('valorGasto');
+        const categoriaEl = document.getElementById('categoriaGasto');
+        const dataEl = document.getElementById('dataGasto');
+
+        if (descricaoEl) descricaoEl.value = interpretado.descricao;
+        if (valorEl) valorEl.value = interpretado.valor;
+        if (categoriaEl) categoriaEl.value = interpretado.categoria;
+        if (dataEl) dataEl.value = interpretado.data;
+
+        input.value = '';
+    }
+
     // ========== CRUD GASTOS ==========
     async salvarGasto() {
         const id = document.getElementById('gastoId');
@@ -227,6 +302,33 @@ class FinanceApp {
             data: data.value
         };
 
+        if (!idExistente) {
+            const duplicado = this.encontrarGastoParecido(campos.descricao, campos.valor, campos.data);
+            if (duplicado) {
+                this.mostrarConfirmacao(
+                    `Você já tem um gasto parecido: "${duplicado.descricao}" de ${this.formatarMoeda(duplicado.valor)} em ${this.formatarData(duplicado.data)}. Lançar mesmo assim?`,
+                    () => this.finalizarSalvarGasto(idExistente, campos)
+                );
+                return;
+            }
+        }
+
+        await this.finalizarSalvarGasto(idExistente, campos);
+    }
+
+    // Procura um gasto com mesma descrição+valor lançado até 1 dia de
+    // diferença — usado para avisar antes de criar um lançamento duplicado.
+    encontrarGastoParecido(descricao, valor, dataISO) {
+        const dataAlvo = this.parseDataLocal(dataISO).getTime();
+        const umDiaMs = 24 * 60 * 60 * 1000;
+        return this.gastos.find(g => {
+            if (g.descricao.trim().toLowerCase() !== descricao.trim().toLowerCase()) return false;
+            if (Math.abs(g.valor - valor) > 0.01) return false;
+            return Math.abs(this.parseDataLocal(g.data).getTime() - dataAlvo) <= umDiaMs;
+        });
+    }
+
+    async finalizarSalvarGasto(idExistente, campos) {
         try {
             if (idExistente) {
                 const index = this.gastos.findIndex(g => g.id === idExistente);
@@ -950,17 +1052,29 @@ class FinanceApp {
             }
 
             if (pendenteReceber > 0) {
-                alertasHTML += `<div class="alerta info"><i class="fas fa-hand-holding-usd"></i><span>💰 R$ ${pendenteReceber.toFixed(2)} a receber</span></div>`;
+                alertasHTML += `<div class="alerta info"><i class="fas fa-hand-holding-usd"></i><span>💰 ${this.formatarMoeda(pendenteReceber)} a receber</span></div>`;
             }
 
             if (gastosPendentes > 0) {
-                alertasHTML += `<div class="alerta warning"><i class="fas fa-clock"></i><span>⏰ R$ ${gastosPendentes.toFixed(2)} em gastos pendentes</span></div>`;
+                alertasHTML += `<div class="alerta warning"><i class="fas fa-clock"></i><span>⏰ ${this.formatarMoeda(gastosPendentes)} em gastos pendentes</span></div>`;
             }
 
             const recorrentesAtivos = this.recorrentes.filter(r => r.ativo && r.responsavel === 'Eu');
             if (recorrentesAtivos.length > 0) {
                 const totalRecorrente = recorrentesAtivos.reduce((sum, r) => sum + r.valor, 0);
-                alertasHTML += `<div class="alerta info"><i class="fas fa-sync-alt"></i><span>🔄 R$ ${totalRecorrente.toFixed(2)} em recorrentes</span></div>`;
+                alertasHTML += `<div class="alerta info"><i class="fas fa-sync-alt"></i><span>🔄 ${this.formatarMoeda(totalRecorrente)} em recorrentes</span></div>`;
+            }
+
+            // Categorias com gasto bem acima da média dos últimos meses
+            this.verificarGastosForaDoPadrao().forEach(mensagem => {
+                alertasHTML += `<div class="alerta warning"><i class="fas fa-chart-line"></i><span>${mensagem}</span></div>`;
+            });
+
+            // Previsão de saldo no fim do mês (considerando gastos meus ainda pendentes)
+            if (gastosPendentes > 0) {
+                const previsaoFimMes = this.calcularPrevisaoSaldoFimDoMes();
+                const tipoAlerta = previsaoFimMes < 0 ? 'danger' : 'info';
+                alertasHTML += `<div class="alerta ${tipoAlerta}"><i class="fas fa-calendar-check"></i><span>📊 Previsão pro fim do mês: ${this.formatarMoeda(previsaoFimMes)}</span></div>`;
             }
 
             if (!alertasHTML) {
@@ -969,6 +1083,59 @@ class FinanceApp {
         }
 
         alertasContainer.innerHTML = alertasHTML;
+    }
+
+    // Compara o gasto do mês atual em cada categoria com a média dos últimos
+    // 3 meses (só entre os meses que realmente tiveram gasto naquela
+    // categoria) e avisa quando a categoria está passando bastante da média.
+    verificarGastosForaDoPadrao() {
+        const hoje = new Date();
+        const mesAtualStr = hoje.toISOString().slice(0, 7);
+        const categorias = [...new Set(this.gastos.filter(g => g.responsavel === 'Eu').map(g => g.categoria))];
+        const alertas = [];
+
+        categorias.forEach(categoria => {
+            const totalMesAtual = this.gastos
+                .filter(g => g.categoria === categoria && g.responsavel === 'Eu' && g.data.startsWith(mesAtualStr))
+                .reduce((sum, g) => sum + g.valor, 0);
+
+            if (totalMesAtual === 0) return;
+
+            let somaMesesAnteriores = 0;
+            let mesesComDados = 0;
+            for (let i = 1; i <= 3; i++) {
+                const mesRef = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+                const mesRefStr = `${mesRef.getFullYear()}-${String(mesRef.getMonth() + 1).padStart(2, '0')}`;
+                const totalMesRef = this.gastos
+                    .filter(g => g.categoria === categoria && g.responsavel === 'Eu' && g.data.startsWith(mesRefStr))
+                    .reduce((sum, g) => sum + g.valor, 0);
+                if (totalMesRef > 0) {
+                    somaMesesAnteriores += totalMesRef;
+                    mesesComDados++;
+                }
+            }
+
+            if (mesesComDados === 0) return;
+
+            const media = somaMesesAnteriores / mesesComDados;
+            if (media > 0 && totalMesAtual > media * 1.4) {
+                const percentual = Math.round(((totalMesAtual / media) - 1) * 100);
+                alertas.push(`${this.formatarCategoria(categoria)} está ${percentual}% acima da média (${this.formatarMoeda(totalMesAtual)} vs. média de ${this.formatarMoeda(media)})`);
+            }
+        });
+
+        return alertas;
+    }
+
+    // Saldo atual menos os gastos meus que ainda faltam vencer neste mês —
+    // uma estimativa simples de "quanto sobra" até o fim do mês.
+    calcularPrevisaoSaldoFimDoMes() {
+        const mesAtualStr = new Date().toISOString().slice(0, 7);
+        const saldoAtual = this.calcularSaldoTotal();
+        const gastosFuturosMes = this.gastos
+            .filter(g => g.responsavel === 'Eu' && !g.pago && g.data.startsWith(mesAtualStr))
+            .reduce((sum, g) => sum + g.valor, 0);
+        return saldoAtual - gastosFuturosMes;
     }
 
     atualizarStatsRapidos() {
