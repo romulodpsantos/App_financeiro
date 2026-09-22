@@ -22,6 +22,7 @@ module.exports = async function handler(req, res) {
     if (req.headers['authorization']) cabecalhosEnvio['authorization'] = req.headers['authorization'];
     if (req.headers['prefer']) cabecalhosEnvio['prefer'] = req.headers['prefer'];
     if (req.headers['range']) cabecalhosEnvio['range'] = req.headers['range'];
+    if (req.headers['origin']) cabecalhosEnvio['origin'] = req.headers['origin'];
     cabecalhosEnvio['accept'] = 'application/json';
 
     const metodo = req.method || 'GET';

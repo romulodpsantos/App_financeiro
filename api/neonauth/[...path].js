@@ -24,6 +24,7 @@ const BASE_NEON_AUTH = 'https://ep-cold-salad-acpa0axd.neonauth.sa-east-1.aws.ne
 
 module.exports = async function handler(req, res) {
     const partesCaminho = Array.isArray(req.query.path) ? req.query.path : [];
+    console.log('[neonauth proxy] url=%s query=%j partesCaminho=%j', req.url, req.query, partesCaminho);
     const destino = new URL(`${BASE_NEON_AUTH}/${partesCaminho.join('/')}`);
 
     for (const [chave, valor] of Object.entries(req.query)) {
@@ -37,6 +38,7 @@ module.exports = async function handler(req, res) {
     if (req.headers['content-type']) cabecalhosEnvio['content-type'] = req.headers['content-type'];
     if (req.headers['cookie']) cabecalhosEnvio['cookie'] = req.headers['cookie'];
     if (req.headers['authorization']) cabecalhosEnvio['authorization'] = req.headers['authorization'];
+    if (req.headers['origin']) cabecalhosEnvio['origin'] = req.headers['origin'];
     cabecalhosEnvio['accept'] = 'application/json';
 
     const metodo = req.method || 'GET';
