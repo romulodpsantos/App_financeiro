@@ -6,9 +6,10 @@
 // URLs públicas do projeto Neon "Controle Financeiro" (não são segredo — não
 // incluem usuário/senha do banco, apenas os endpoints do Auth e da Data API).
 //
-// Em produção (Vercel), passamos por /api/neonauth e /api/data — duas
-// serverless functions (api/neonauth/[...path].js e api/data/[...path].js)
-// que repassam essas chamadas pro Neon nos bastidores. Isso é necessário
+// Em produção (Vercel), passamos por /api/neonauth e /api/data — dois
+// rewrites internos (vercel.json) que encaminham pra api/neonauth-handler.js
+// e api/data-handler.js, que repassam essas chamadas pro Neon nos
+// bastidores. Isso é necessário
 // porque o Safari (inclusive todo navegador no iPhone, já que todos usam o
 // mesmo motor) bloqueia por padrão o cookie de sessão quando ele vem de um
 // domínio diferente do site (neon.tech vs. vercel.app) — ao passar pelo

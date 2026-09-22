@@ -1,20 +1,18 @@
-// api/data/[...path].js — Proxy same-origin para a Neon Data API.
-// Mesma razão do api/auth/[...path].js (ver comentário lá): precisa ser uma
-// requisição nova de verdade (fetch), não um "rewrite" simples, senão o
-// Neon rejeita pelo cabeçalho Host vir do domínio da Vercel.
+// api/data-handler.js — Proxy same-origin para a Neon Data API.
+// Mesma razão e mesmo esquema do api/neonauth-handler.js (ver comentário
+// lá): alcançado via rewrite interno no vercel.json (/api/data/(.*) ->
+// /api/data-handler?path=$1), porque o catch-all de arquivo ([...path].js)
+// só casa um segmento de caminho fora de projetos Next.js — quebraria em
+// chamadas RPC (/rpc/nome_da_funcao) e em qualquer filtro com "/" na URL.
 
 const BASE_NEON_DATA_API = 'https://ep-cold-salad-acpa0axd.apirest.sa-east-1.aws.neon.tech/financeiro/rest/v1';
 
 module.exports = async function handler(req, res) {
-    // A Vercel usa literalmente "...path" (com reticências) como chave da
-    // query para o segmento catch-all de api/data/[...path].js — não "path"
-    // simples. Ver comentário equivalente em api/neonauth/[...path].js.
-    const valorPath = req.query['...path'];
-    const partesCaminho = Array.isArray(valorPath) ? valorPath : (valorPath ? [valorPath] : []);
-    const destino = new URL(`${BASE_NEON_DATA_API}/${partesCaminho.join('/')}`);
+    const resto = typeof req.query.path === 'string' ? req.query.path : '';
+    const destino = new URL(`${BASE_NEON_DATA_API}/${resto}`);
 
     for (const [chave, valor] of Object.entries(req.query)) {
-        if (chave === '...path') continue;
+        if (chave === 'path') continue;
         for (const v of Array.isArray(valor) ? valor : [valor]) {
             destino.searchParams.append(chave, v);
         }
