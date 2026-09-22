@@ -6,21 +6,24 @@
 // URLs públicas do projeto Neon "Controle Financeiro" (não são segredo — não
 // incluem usuário/senha do banco, apenas os endpoints do Auth e da Data API).
 //
-// Em produção (Vercel), passamos por /api/auth e /api/data — dois "rewrites"
-// definidos em vercel.json que fazem a Vercel repassar essas chamadas pro
-// Neon nos bastidores. Isso é necessário porque o Safari (inclusive todo
-// navegador no iPhone, já que todos usam o mesmo motor) bloqueia por padrão
-// o cookie de sessão quando ele vem de um domínio diferente do site
-// (neon.tech vs. vercel.app) — ao passar pelo mesmo domínio do site, o
-// cookie vira "primeira parte" e o Safari não bloqueia mais. Em localhost
-// (sem Vercel rodando) usamos as URLs diretas, que funcionam bem no Chrome
-// usado pra desenvolvimento.
+// Em produção (Vercel), passamos por /api/neonauth e /api/data — duas
+// serverless functions (api/neonauth/[...path].js e api/data/[...path].js)
+// que repassam essas chamadas pro Neon nos bastidores. Isso é necessário
+// porque o Safari (inclusive todo navegador no iPhone, já que todos usam o
+// mesmo motor) bloqueia por padrão o cookie de sessão quando ele vem de um
+// domínio diferente do site (neon.tech vs. vercel.app) — ao passar pelo
+// mesmo domínio do site, o cookie vira "primeira parte" e o Safari não
+// bloqueia mais. (A rota é "/api/neonauth", não "/api/auth", porque a
+// Vercel trata "/api/auth/*" como caminho reservado do próprio recurso de
+// autenticação da plataforma e devolve 404 antes de chegar na nossa
+// function.) Em localhost (sem Vercel rodando) usamos as URLs diretas, que
+// funcionam bem no Chrome usado pra desenvolvimento.
 import { createClient } from 'https://esm.sh/@neondatabase/neon-js@0.7.0-beta';
 
 const USANDO_PROXY_VERCEL = !['localhost', '127.0.0.1'].includes(location.hostname);
 
 const AUTH_URL = USANDO_PROXY_VERCEL
-    ? `${location.origin}/api/auth`
+    ? `${location.origin}/api/neonauth`
     : 'https://ep-cold-salad-acpa0axd.neonauth.sa-east-1.aws.neon.tech/financeiro/auth';
 const DATA_API_URL = USANDO_PROXY_VERCEL
     ? `${location.origin}/api/data`

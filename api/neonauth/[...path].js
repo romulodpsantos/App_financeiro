@@ -1,4 +1,4 @@
-// api/auth/[...path].js — Proxy same-origin para o Neon Auth.
+// api/neonauth/[...path].js — Proxy same-origin para o Neon Auth.
 //
 // Por que existe: o Safari (e todo navegador no iPhone, que usa o mesmo
 // motor) bloqueia o cookie de sessão do Neon Auth por ele vir de um domínio
@@ -13,6 +13,12 @@
 // o do próprio Neon. A resposta (incluindo o Set-Cookie) é repassada de
 // volta como se tivesse vindo do nosso próprio domínio — por isso o
 // navegador passa a tratar o cookie como "primeira parte".
+//
+// Chama-se "neonauth" (não "auth") porque a Vercel trata "/api/auth/*"
+// como caminho reservado do seu próprio recurso de autenticação e devolve
+// 404 antes mesmo de chegar nesta function — confirmado testando em
+// produção: "/api/data/*" (nome comum) funcionou de primeira, "/api/auth/*"
+// nunca chegou a ser invocado.
 
 const BASE_NEON_AUTH = 'https://ep-cold-salad-acpa0axd.neonauth.sa-east-1.aws.neon.tech/financeiro/auth';
 
