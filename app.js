@@ -62,6 +62,7 @@ class FinanceApp {
         this.atualizarListaRecorrentes();
         this.atualizarListaCartoes();
         this.atualizarListaComprasCartao();
+        this.atualizarProjecaoMeses();
         this.carregarSelectPessoas();
         this.carregarSelectCartoes();
         this.configurarDataAtual();
@@ -990,57 +991,47 @@ class FinanceApp {
     }
 
     // ========== ATUALIZAÇÕES DE INTERFACE ==========
-    // Ganhos/gastos pagos de um mês específico (ano, mês 0-indexado) — usado
-    // tanto pro resumo "real" do mês atual (alertas, previsões) quanto pro
-    // mês que o usuário está navegando no card do topo do Dashboard.
+    // Resumo completo de um mês específico (ano, mês 0-indexado): ganhos,
+    // gastos já pagos, saldo, e o que ainda está em aberto naquele mês —
+    // usado tanto pro resumo "real" do mês atual (alertas, previsões) quanto
+    // pro mês que o usuário está navegando no topo do Dashboard.
     calcularResumoMes(ano, mes) {
         const prefixo = `${ano}-${String(mes + 1).padStart(2, '0')}`;
-        const gastos = this.gastos
-            .filter(g => g.data.startsWith(prefixo) && g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
+        const gastosDoMes = this.gastos.filter(g => g.data.startsWith(prefixo));
         const ganhos = this.ganhos
             .filter(g => g.data.startsWith(prefixo))
             .reduce((sum, g) => sum + g.valor, 0);
-        return { ganhos, gastos, saldo: ganhos - gastos };
+        const gastos = gastosDoMes.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
+        // Meus gastos ainda não pagos nesse mês (o que eu tenho que pagar).
+        const pendentes = gastosDoMes.filter(g => !g.pago && g.responsavel === 'Eu').reduce((sum, g) => sum + g.valor, 0);
+        // De outras pessoas, ainda não pago (dinheiro que vai entrar).
+        const aReceber = gastosDoMes.filter(g => !g.pago && g.responsavel !== 'Eu').reduce((sum, g) => sum + g.valor, 0);
+        return {
+            ganhos, gastos, pendentes, aReceber,
+            saldo: ganhos - gastos,
+            entradasPrevistas: ganhos + aReceber,
+            saidasPrevistas: gastos + pendentes
+        };
     }
 
     atualizarDashboard() {
         const hoje = new Date();
         const resumoAtual = this.calcularResumoMes(hoje.getFullYear(), hoje.getMonth());
-        const saldoTotal = this.calcularSaldoTotal();
-
-        // REGRA 6: Pendentes a pagar (meus gastos não pagos)
-        const gastosPendentes = this.gastos
-            .filter(g => !g.pago && g.responsavel === 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const gastosPagados = this.gastos
-            .filter(g => g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        // REGRA 3: A receber (gastos de outras pessoas não pagos)
-        const pendenteReceber = this.gastos
-            .filter(g => !g.pago && g.responsavel !== 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        this.atualizarElementoTexto('saldo', this.formatarMoeda(saldoTotal));
-        this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(gastosPendentes));
-        this.atualizarElementoTexto('gastos-pagos', this.formatarMoeda(gastosPagados));
-        this.atualizarElementoTexto('pendente-receber', this.formatarMoeda(pendenteReceber));
 
         // Alertas e previsão do fim do mês sempre com base no mês REAL de
         // hoje, independente de qual mês o usuário esteja navegando nos
         // cards de cima — não faz sentido alertar "previsão pro fim do mês"
         // olhando pra um mês passado ou futuro.
-        this.atualizarAlertas(resumoAtual.ganhos, resumoAtual.gastos, gastosPendentes, pendenteReceber);
+        this.atualizarAlertas(resumoAtual.ganhos, resumoAtual.gastos, resumoAtual.pendentes, resumoAtual.aReceber);
         this.atualizarStatsRapidos();
         this.atualizarPrevisaoPessoas(); // REGRA 7
 
         this.atualizarResumoMesVisualizado();
     }
 
-    // Mês/ano exibido nos cards de Ganhos/Gastos/Saldo e no gráfico do
-    // Dashboard — navegável com as setas, começa sempre no mês atual.
+    // Saldo do topo e os cards de Ganhos/Gastos/Saldo/Pendentes/A Receber/
+    // Pagamentos — todos coerentes com o MESMO mês navegável (setas no topo
+    // do Dashboard), que começa sempre no mês atual.
     atualizarResumoMesVisualizado() {
         if (!this.mesVisualizado) {
             const hoje = new Date();
@@ -1051,6 +1042,13 @@ class FinanceApp {
         const hoje = new Date();
         const ehMesAtual = ano === hoje.getFullYear() && mes === hoje.getMonth();
         const sufixoLabel = ehMesAtual ? 'Este mês' : `${this.formatarMesNome(mes)}/${ano}`;
+
+        this.atualizarElementoTexto('saldo', this.formatarMoeda(resumo.saldo));
+        this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(resumo.pendentes));
+        this.atualizarElementoTexto('gastos-pagos', this.formatarMoeda(resumo.gastos));
+        this.atualizarElementoTexto('pendente-receber', this.formatarMoeda(resumo.aReceber));
+        this.atualizarElementoTexto('entradas-previstas-mes', this.formatarMoeda(resumo.entradasPrevistas));
+        this.atualizarElementoTexto('saidas-previstas-mes', this.formatarMoeda(resumo.saidasPrevistas));
 
         this.atualizarElementoTexto('ganhos-mes', this.formatarMoeda(resumo.ganhos));
         this.atualizarElementoTexto('gastos-mes', this.formatarMoeda(resumo.gastos));
@@ -2405,6 +2403,46 @@ class FinanceApp {
         overlay.querySelector('#pagarFaturaFechar').addEventListener('click', () => overlay.remove());
     }
 
+    // Fatura importada só traz o mês CORRENTE de cada parcela (ex. "4/18" —
+    // o banco só reporta a parcela que está sendo cobrada agora, não as 14
+    // que ainda faltam). Compra manual parcelada já gera todos os meses de
+    // uma vez (gerarTransacoesCartao), mas a importada não — por isso as
+    // parcelas futuras de linhas importadas são só SINTETIZADAS aqui pra
+    // exibição (sem gravar nada no banco), até serem substituídas pelo
+    // lançamento de verdade quando o usuário importar aquele mês depois.
+    // Evita duplicar quando isso acontece checando se já existe um gasto
+    // real com o mesmo cartão/descrição/valor/total de parcelas pro número
+    // de parcela em questão.
+    listarParcelasFuturasNaoGeradas(cartaoIdFiltro = null) {
+        const resultado = [];
+        this.gastos
+            .filter(g => !g.pago && g.compraCartaoId && g.parcelaNumero && g.totalParcelas && g.parcelaNumero < g.totalParcelas)
+            .filter(g => cartaoIdFiltro === null || g.cartaoId === cartaoIdFiltro)
+            .forEach(g => {
+                const dataBase = this.parseDataLocal(g.data);
+                for (let n = g.parcelaNumero + 1; n <= g.totalParcelas; n++) {
+                    const jaTemReal = this.gastos.some(g2 =>
+                        g2.cartaoId === g.cartaoId && g2.totalParcelas === g.totalParcelas &&
+                        g2.parcelaNumero === n && Math.abs(g2.valor - g.valor) < 0.01 && g2.descricao === g.descricao
+                    );
+                    if (jaTemReal) continue;
+                    const dataFutura = new Date(dataBase.getFullYear(), dataBase.getMonth() + (n - g.parcelaNumero), dataBase.getDate());
+                    resultado.push({
+                        cartaoId: g.cartaoId,
+                        ano: dataFutura.getFullYear(),
+                        mes: dataFutura.getMonth(),
+                        dataISO: dataFutura.toISOString().split('T')[0],
+                        valor: g.valor,
+                        responsavel: g.responsavel,
+                        descricao: g.descricao,
+                        parcelaNumero: n,
+                        totalParcelas: g.totalParcelas
+                    });
+                }
+            });
+        return resultado;
+    }
+
     // ========== VER PRÓXIMAS FATURAS ==========
     // Igual a obterFaturasNaoPagas, mas sem filtrar por responsável — aqui é
     // o valor total que o banco vai cobrar (a fatura não sabe quem vai
@@ -2412,20 +2450,29 @@ class FinanceApp {
     // extra.
     obterProximasFaturas(cartaoId) {
         const grupos = new Map();
+        const adicionar = (ano, mes, dataVencimento, valor, responsavel) => {
+            const chave = `${ano}-${mes}`;
+            if (!grupos.has(chave)) {
+                grupos.set(chave, { ano, mes, dataVencimento, total: 0, totalMeu: 0, totalOutros: 0, qtd: 0 });
+            }
+            const grupo = grupos.get(chave);
+            grupo.total += valor;
+            grupo.qtd++;
+            if (responsavel === 'Eu') grupo.totalMeu += valor;
+            else grupo.totalOutros += valor;
+        };
+
         this.gastos
             .filter(g => g.cartaoId === cartaoId && !g.pago)
             .forEach(g => {
                 const d = this.parseDataLocal(g.data);
-                const chave = `${d.getFullYear()}-${d.getMonth()}`;
-                if (!grupos.has(chave)) {
-                    grupos.set(chave, { ano: d.getFullYear(), mes: d.getMonth(), dataVencimento: g.data, total: 0, totalMeu: 0, totalOutros: 0, qtd: 0 });
-                }
-                const grupo = grupos.get(chave);
-                grupo.total += g.valor;
-                grupo.qtd++;
-                if (g.responsavel === 'Eu') grupo.totalMeu += g.valor;
-                else grupo.totalOutros += g.valor;
+                adicionar(d.getFullYear(), d.getMonth(), g.data, g.valor, g.responsavel);
             });
+
+        this.listarParcelasFuturasNaoGeradas(cartaoId).forEach(p => {
+            adicionar(p.ano, p.mes, p.dataISO, p.valor, p.responsavel);
+        });
+
         return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
     }
 
@@ -2555,6 +2602,20 @@ class FinanceApp {
                     alvo.gastosPrevistos += r.valor;
                     alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: `${r.descricao} (parcela ${numeroParcela}/${r.parcelas})`, valor: r.valor });
                 }
+            }
+        });
+
+        // 5) Compras de cartão importadas com parcelas futuras que a fatura
+        // ainda não trouxe (ver listarParcelasFuturasNaoGeradas).
+        this.listarParcelasFuturasNaoGeradas().forEach(p => {
+            const alvo = achaMes(p.mes, p.ano);
+            if (!alvo) return;
+            if (p.responsavel === 'Eu') {
+                alvo.gastosPrevistos += p.valor;
+                alvo.detalhes.push({ tipo: 'gasto', origem: 'fatura', descricao: `${p.descricao} (parcela ${p.parcelaNumero}/${p.totalParcelas})`, valor: p.valor });
+            } else {
+                alvo.ganhosPrevistos += p.valor;
+                alvo.detalhes.push({ tipo: 'ganho', origem: 'recebimento', descricao: `${p.descricao} (${p.responsavel}, parcela ${p.parcelaNumero}/${p.totalParcelas})`, valor: p.valor });
             }
         });
 
