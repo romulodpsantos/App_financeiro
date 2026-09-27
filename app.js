@@ -1074,7 +1074,7 @@ class FinanceApp {
         const sufixoLabel = ehMesAtual ? 'Este mês' : `${this.formatarMesNome(mes)}/${ano}`;
 
         this.atualizarElementoTexto('saldo', this.formatarMoeda(resumo.saldo));
-        this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(resumo.pendentes));
+        this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(resumo.pendentesTotal));
         this.atualizarElementoTexto('gastos-pagos', this.formatarMoeda(resumo.gastos));
         this.atualizarElementoTexto('pendente-receber', this.formatarMoeda(resumo.aReceber));
         this.atualizarElementoTexto('entradas-previstas-mes', this.formatarMoeda(resumo.entradasPrevistas));
@@ -1488,9 +1488,23 @@ class FinanceApp {
 
     // ========== ATUALIZAR LISTA PESSOAS ==========
     atualizarListaPessoas() {
+        // Minha parte em TODAS as parcelas de cartão ainda não pagas (só o
+        // que é meu, não a fatura inteira) — pedido pra comparar contra o
+        // que eu ganho e ver se não estou gastando mais do que posso,
+        // separado da visão de "quanto tenho que pagar no total" que fica
+        // no Dashboard. Sem restringir a um mês: a data de uma compra de
+        // cartão é o VENCIMENTO da fatura (pode cair no mês seguinte,
+        // dependendo do fechamento), não o mês em que a compra foi feita —
+        // então "só este mês" mostraria menos do que a pessoa realmente
+        // deve no total.
+        const minhaParteCartoes = this.gastos
+            .filter(g => g.cartaoId && !g.pago && g.responsavel === 'Eu')
+            .reduce((sum, g) => sum + g.valor, 0);
+        this.atualizarElementoTexto('minha-parte-cartoes', this.formatarMoeda(minhaParteCartoes));
+
         const container = document.getElementById('lista-pessoas');
         if (!container) return;
-        
+
         if (this.pessoas.length === 0) {
             container.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Nenhuma pessoa cadastrada</p></div>';
             return;
@@ -2651,14 +2665,20 @@ class FinanceApp {
         });
 
         // 5) Compras de cartão importadas com parcelas futuras que a fatura
-        // ainda não trouxe (ver listarParcelasFuturasNaoGeradas).
+        // ainda não trouxe (ver listarParcelasFuturasNaoGeradas). Mesmo
+        // padrão dos passos 1/2: o total sai do meu bolso independente de
+        // quem é a compra (banco cobra tudo de mim), e a parte de outras
+        // pessoas ENTRA TAMBÉM em ganhosPrevistos como "a receber" — as duas
+        // coisas ao mesmo tempo, não uma OU outra (bug anterior: só entrava
+        // num lado ou no outro, fazendo a parte de terceiros sumir do total
+        // de gastos previstos).
         this.listarParcelasFuturasNaoGeradas().forEach(p => {
             const alvo = achaMes(p.mes, p.ano);
             if (!alvo) return;
-            if (p.responsavel === 'Eu') {
-                alvo.gastosPrevistos += p.valor;
-                alvo.detalhes.push({ tipo: 'gasto', origem: 'fatura', descricao: `${p.descricao} (parcela ${p.parcelaNumero}/${p.totalParcelas})`, valor: p.valor });
-            } else {
+            const sufixo = p.responsavel !== 'Eu' ? ` (${p.responsavel})` : '';
+            alvo.gastosPrevistos += p.valor;
+            alvo.detalhes.push({ tipo: 'gasto', origem: 'fatura', descricao: `${p.descricao}${sufixo} (parcela ${p.parcelaNumero}/${p.totalParcelas})`, valor: p.valor });
+            if (p.responsavel !== 'Eu') {
                 alvo.ganhosPrevistos += p.valor;
                 alvo.detalhes.push({ tipo: 'ganho', origem: 'recebimento', descricao: `${p.descricao} (${p.responsavel}, parcela ${p.parcelaNumero}/${p.totalParcelas})`, valor: p.valor });
             }
