@@ -209,14 +209,14 @@ function parseInterPDFLinhas(linhasTexto) {
     return { transacoes, dataVencimento };
 }
 
-async function parseInterPDF(arrayBuffer) {
-    // A assinatura "%PDF-" pode vir alguns bytes depois do início do arquivo
-    // (comum em PDFs gerados/exportados por certas ferramentas, e é por isso
-    // que o próprio PDF.js procura por ela numa janela inicial em vez de
-    // exigir que esteja exatamente no byte 0). Uma versão anterior desta
-    // checagem exigia posição 0 e chegou a rejeitar um PDF real e completo
-    // do Inter só por causa disso — por isso a busca é numa janela, não uma
-    // comparação exata do início.
+// A assinatura "%PDF-" pode vir alguns bytes depois do início do arquivo
+// (comum em PDFs gerados/exportados por certas ferramentas, e é por isso
+// que o próprio PDF.js procura por ela numa janela inicial em vez de exigir
+// que esteja exatamente no byte 0). Uma versão anterior desta checagem
+// exigia posição 0 e chegou a rejeitar um PDF real e completo do Inter só
+// por causa disso — por isso a busca é numa janela, não uma comparação
+// exata do início.
+function verificarAssinaturaPDF(arrayBuffer) {
     const inicio = new Uint8Array(arrayBuffer.slice(0, 1024));
     const textoInicio = String.fromCharCode(...inicio);
     if (!textoInicio.includes('%PDF-')) {
@@ -228,11 +228,120 @@ async function parseInterPDF(arrayBuffer) {
         const textoLegivel = primeirosBytes.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('');
         throw new Error(`O arquivo não parece ser um PDF (${arrayBuffer.byteLength} byte(s) lidos, assinatura "%PDF-" não encontrada nos primeiros 1024 bytes).\n\nPrimeiros bytes (hex): ${hex}\nComo texto: ${textoLegivel}\n\nTire um print desta mensagem e me mande — isso vai mostrar o que realmente está chegando.`);
     }
+}
 
+async function parseInterPDF(arrayBuffer) {
+    verificarAssinaturaPDF(arrayBuffer);
     const linhas = await extrairLinhasDoPDF(arrayBuffer);
     const resultado = parseInterPDFLinhas(linhas);
     if (resultado.transacoes.length === 0) {
         throw new Error('Não encontrei nenhum lançamento no PDF. O formato pode ter mudado — avise para eu ajustar o importador.');
+    }
+    return resultado;
+}
+
+// ---- Parsing de PDF (fatura do Santander) ----
+// A fatura do Santander detalha as compras em blocos por cartão (pode ter
+// mais de um cartão na mesma fatura, ex. cartão adicional — todos entram no
+// MESMO cartão escolhido pelo usuário no modal, igual ao Inter), divididos
+// em seções "Pagamento e Demais Créditos" / "Parcelamentos" / "Despesas".
+// Em vez de tentar reconhecer cada cabeçalho de seção/coluna e cada linha de
+// metadado (ex. "COTAÇÃO DÓLAR", "IOF DESPESA NO EXTERIOR", que são só
+// informação extra sobre a compra anterior, já refletida no valor em R$
+// dela), a expressão regular já exige que a linha COMECE com uma data
+// "DD/MM" (com um número solto opcional antes, que é um ícone de forma de
+// pagamento virando texto) — isso sozinho já exclui cabeçalhos, totais e
+// linhas de metadado, que nunca começam assim.
+const REGEX_LINHA_SANTANDER = /^(?:\d+\s+)?(\d{2})\/(\d{2})\s+(.+?)(?:\s+(\d{2})\/(\d{2}))?\s+(-?[\d.]+,\d{2})(?:\s+[\d.]+,\d{2})?$/;
+const REGEX_DATA_DDMMAAAA = /(\d{2})\/(\d{2})\/(\d{4})/;
+
+function extrairVencimentoSantander(linhasTexto) {
+    for (let i = 0; i < linhasTexto.length; i++) {
+        const linha = linhasTexto[i].trim();
+        if (!/^vencimento\b/i.test(linha)) continue;
+        const mesmaLinha = linha.match(REGEX_DATA_DDMMAAAA);
+        if (mesmaLinha) return `${mesmaLinha[3]}-${mesmaLinha[2]}-${mesmaLinha[1]}`;
+        // No layout da fatura, o rótulo "Vencimento" e a data ficam em caixas
+        // separadas — o PDF.js pode reconstruir isso como duas linhas.
+        const proxima = (linhasTexto[i + 1] || '').trim().match(REGEX_DATA_DDMMAAAA);
+        if (proxima) return `${proxima[3]}-${proxima[2]}-${proxima[1]}`;
+    }
+    return null;
+}
+
+function parseSantanderPDFLinhas(linhasTexto) {
+    const transacoes = [];
+    const dataVencimento = extrairVencimentoSantander(linhasTexto);
+    const anoRef = dataVencimento ? parseInt(dataVencimento.slice(0, 4), 10) : new Date().getFullYear();
+    const mesVencimento = dataVencimento ? parseInt(dataVencimento.slice(5, 7), 10) : null;
+
+    // O fechamento da fatura é ~1 semana antes do vencimento, então cai
+    // normalmente no mês anterior — usado como "mês 1" pra contar parcelas
+    // pra trás (ver comentário abaixo, na conta de `parcelaAtualTxt`).
+    let mesFechamento = mesVencimento !== null ? mesVencimento - 1 : null;
+    let anoFechamento = anoRef;
+    if (mesFechamento !== null && mesFechamento < 1) { mesFechamento = 12; anoFechamento -= 1; }
+
+    for (const linhaBruta of linhasTexto) {
+        const linha = linhaBruta.trim();
+        const m = linha.match(REGEX_LINHA_SANTANDER);
+        if (!m) continue;
+        const [, diaTxt, mesTxt, descBruta, parcelaAtualTxt, parcelaTotalTxt, valorTxt] = m;
+        const dia = parseInt(diaTxt, 10);
+        const mes = parseInt(mesTxt, 10);
+        if (mes < 1 || mes > 12 || dia < 1 || dia > 31) continue;
+
+        const descricao = descBruta.trim();
+        if (!descricao) continue;
+
+        // A data mostrada numa compra PARCELADA é a da compra ORIGINAL, que
+        // pode ser de quase um ano atrás (ex. parcela 12/12 = comprado há 11
+        // meses) — não só "um pouco antes do vencimento" como numa compra
+        // avulsa. Por isso, se tem parcela, calcula quantos meses atrás essa
+        // parcela deveria cair a partir do fechamento e só usa esse ano se o
+        // mês bater com o mês realmente impresso na fatura (senão cai no
+        // palpite simples abaixo, mais conservador).
+        let ano = anoRef;
+        if (parcelaAtualTxt && mesFechamento !== null) {
+            const mesesAtras = parseInt(parcelaAtualTxt, 10) - 1;
+            let mesAlvo = mesFechamento - mesesAtras;
+            let anoAlvo = anoFechamento;
+            while (mesAlvo < 1) { mesAlvo += 12; anoAlvo -= 1; }
+            if (mesAlvo === mes) ano = anoAlvo;
+            else if (mesVencimento !== null && mes - mesVencimento > 1) ano = anoRef - 1;
+        } else if (mesVencimento !== null && mes - mesVencimento > 1) {
+            // Compra avulsa (sem parcela) bem mais "no futuro" que o
+            // vencimento só faz sentido se for do ano anterior.
+            ano = anoRef - 1;
+        }
+
+        const { valor } = paraValorBR(valorTxt);
+
+        transacoes.push({
+            data: `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+            descricao,
+            descricaoOriginal: descricao,
+            valor: Math.abs(valor),
+            parcelaNumero: parcelaAtualTxt ? parseInt(parcelaAtualTxt, 10) : null,
+            totalParcelas: parcelaTotalTxt ? parseInt(parcelaTotalTxt, 10) : null,
+            // Pagamentos/créditos (ex. pagamento da fatura anterior) vêm com
+            // valor negativo; a anuidade zerada (R$0,00) também não conta.
+            ehCompra: valor > 0
+        });
+    }
+
+    return { transacoes, dataVencimento };
+}
+
+// ---- Dispatcher: identifica o banco pelo conteúdo do PDF e usa o parser certo ----
+async function parsePDFFatura(arrayBuffer) {
+    verificarAssinaturaPDF(arrayBuffer);
+    const linhas = await extrairLinhasDoPDF(arrayBuffer);
+    const textoCompleto = linhas.join(' ').toLowerCase();
+    const ehSantander = textoCompleto.includes('santander');
+    const resultado = ehSantander ? parseSantanderPDFLinhas(linhas) : parseInterPDFLinhas(linhas);
+    if (resultado.transacoes.length === 0) {
+        throw new Error(`Não encontrei nenhum lançamento no PDF (identifiquei como fatura do ${ehSantander ? 'Santander' : 'Inter'}). O formato pode ter mudado, ou não reconheci o banco certo — avise para eu ajustar o importador.`);
     }
     return resultado;
 }
@@ -280,6 +389,8 @@ function extrairDataDoNomeArquivo(nomeArquivo) {
 window.Importador = {
     parseNubankCSV,
     parseInterPDF,
+    parseSantanderPDFLinhas,
+    parsePDFFatura,
     categorizarPorDescricao,
     calcularHashLinha,
     extrairDataDoNomeArquivo
@@ -313,7 +424,7 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
                     <select id="importCartaoId">${opcoesCartao}</select>
                 </div>
                 <div class="input-group">
-                    <label>Arquivo (CSV do Nubank ou PDF do Inter)</label>
+                    <label>Arquivo (CSV do Nubank ou PDF do Inter/Santander)</label>
                     <input type="file" id="importArquivo" accept=".csv,text/csv,.pdf,application/pdf">
                 </div>
                 <div class="input-group">
@@ -371,7 +482,7 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
             let resultado;
             if (/\.pdf$/i.test(arquivo.name) || arquivo.type === 'application/pdf') {
                 const buffer = await lerArquivoComoArrayBuffer(arquivo);
-                resultado = await window.Importador.parseInterPDF(buffer);
+                resultado = await window.Importador.parsePDFFatura(buffer);
             } else {
                 const texto = await arquivo.text();
                 resultado = window.Importador.parseNubankCSV(texto);
