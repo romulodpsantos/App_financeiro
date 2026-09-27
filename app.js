@@ -1576,6 +1576,11 @@ class FinanceApp {
                             `).join('')}
                         </div>
                     </div>
+                    <div class="person-actions">
+                        <button class="btn-icon" onclick="app.verDetalhesMinhaParteCartoes()" title="Ver o que compõe cada mês">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
                 </div>
             `;
         }
@@ -2528,9 +2533,26 @@ class FinanceApp {
             .forEach(g => {
                 const dataBase = this.parseDataLocal(g.data);
                 for (let n = g.parcelaNumero + 1; n <= g.totalParcelas; n++) {
+                    // Comparar por descrição aqui é um erro: cada parcela tem
+                    // seu próprio número EMBUTIDO no texto (ex. "Notebook
+                    // (1/4)" vs "Notebook (2/4)") — nunca bateria com uma
+                    // parcela futura, mesmo quando ela já existe de verdade
+                    // (achado ao testar: compra manual parcelada, que já gera
+                    // TODAS as parcelas de uma vez, estava contando cada uma
+                    // duas vezes — a real e uma sintética fantasma por cima).
+                    // Compra manual: todas as parcelas nascem com o MESMO
+                    // compraCartaoId — isso sozinho já garante que é a mesma
+                    // compra, então vale mesmo se o valor diferir 1 centavo
+                    // por causa do rateio (gerarTransacoesCartao arredonda
+                    // assim). Fatura importada: cada mês vira um
+                    // compraCartaoId novo, então cai no critério mais solto
+                    // (mesmo cartão/total de parcelas/número da parcela/valor
+                    // parecido), sem depender da descrição.
                     const jaTemReal = this.gastos.some(g2 =>
-                        g2.cartaoId === g.cartaoId && g2.totalParcelas === g.totalParcelas &&
-                        g2.parcelaNumero === n && Math.abs(g2.valor - g.valor) < 0.01 && g2.descricao === g.descricao
+                        g2.parcelaNumero === n && g2.totalParcelas === g.totalParcelas && (
+                            g2.compraCartaoId === g.compraCartaoId ||
+                            (g2.cartaoId === g.cartaoId && Math.abs(g2.valor - g.valor) < 0.02)
+                        )
                     );
                     if (jaTemReal) continue;
                     const dataFutura = new Date(dataBase.getFullYear(), dataBase.getMonth() + (n - g.parcelaNumero), dataBase.getDate());
@@ -2583,24 +2605,94 @@ class FinanceApp {
         return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
     }
 
-    // Minha parte (só "Eu") somada de TODOS os cartões, mês a mês — mesma
-    // fonte de dados de obterProximasFaturas (já com as parcelas futuras
-    // sintetizadas), só que agregada entre cartões em vez de por cartão.
-    // Usado pra mostrar "Minha parte em cartões" com o mesmo formato de
-    // "Previsão por Mês" que já existe pra cada pessoa.
+    // Minha parte (só "Eu") somada de TODOS os cartões, mês a mês, já com
+    // cada item que compõe o total (pra dar pra ver "o que são essas N
+    // parcelas" em vez de só o número) — mesmas duas fontes de dado de
+    // obterProximasFaturas (gastos reais + listarParcelasFuturasNaoGeradas),
+    // só que aqui agregando entre cartões em vez de por cartão, e guardando
+    // o item em vez de só a soma.
     obterMinhaParteFaturasPorMes() {
         const grupos = new Map();
+        const adicionar = (ano, mes, descricao, valor, cartaoNome, sintetico) => {
+            const chave = `${ano}-${mes}`;
+            if (!grupos.has(chave)) grupos.set(chave, { ano, mes, total: 0, qtd: 0, itens: [] });
+            const grupo = grupos.get(chave);
+            grupo.total += valor;
+            grupo.qtd++;
+            grupo.itens.push({ descricao, valor, cartaoNome, sintetico });
+        };
+
         this.cartoes.forEach((cartao) => {
-            this.obterProximasFaturas(cartao.id).forEach((f) => {
-                if (f.totalMeu <= 0) return;
-                const chave = `${f.ano}-${f.mes}`;
-                if (!grupos.has(chave)) grupos.set(chave, { ano: f.ano, mes: f.mes, total: 0, qtd: 0 });
-                const grupo = grupos.get(chave);
-                grupo.total += f.totalMeu;
-                grupo.qtd += f.qtdMeu;
-            });
+            this.gastos
+                .filter(g => g.cartaoId === cartao.id && !g.pago && g.responsavel === 'Eu')
+                .forEach((g) => {
+                    const d = this.parseDataLocal(g.data);
+                    adicionar(d.getFullYear(), d.getMonth(), g.descricao, g.valor, cartao.nome, false);
+                });
+            this.listarParcelasFuturasNaoGeradas(cartao.id)
+                .filter(p => p.responsavel === 'Eu')
+                .forEach((p) => {
+                    adicionar(p.ano, p.mes, `${p.descricao} (parcela ${p.parcelaNumero}/${p.totalParcelas})`, p.valor, cartao.nome, true);
+                });
         });
+
         return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
+    }
+
+    verDetalhesMinhaParteCartoes() {
+        const previsaoMensal = this.obterMinhaParteFaturasPorMes();
+        const gastosCartaoMeu = this.gastos.filter(g => g.cartaoId && g.responsavel === 'Eu');
+        const totalPendente = gastosCartaoMeu.filter(g => !g.pago).reduce((sum, g) => sum + g.valor, 0);
+        const totalPago = gastosCartaoMeu.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
+
+        let detalhesHTML = `
+            <h3>💳 Minha parte em cartões</h3>
+            <div class="detalhes-completos-pessoa">
+                <div class="resumo-geral">
+                    <h4>📊 Resumo Geral</h4>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-label">Pendente</span>
+                            <span class="stat-value pendente">${this.formatarMoeda(totalPendente)}</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-label">Já Pago</span>
+                            <span class="stat-value pago">${this.formatarMoeda(totalPago)}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="previsao-mensal-detalhada">
+                    <h4>📅 Previsão Mensal Detalhada</h4>
+                    <div class="tabela-previsao">
+                        <div class="tabela-header">
+                            <span>Mês</span>
+                            <span>Total</span>
+                            <span>Parcelas</span>
+                            <span>Detalhes</span>
+                        </div>
+        `;
+
+        previsaoMensal.forEach((previsao) => {
+            const detalheTexto = previsao.itens
+                .map(item => `${this.formatarMoeda(item.valor)} - ${item.descricao} (${item.cartaoNome})${item.sintetico ? ' <em>previsto</em>' : ''}`)
+                .join('<br>');
+            detalhesHTML += `
+                <div class="tabela-row">
+                    <span class="mes">${this.formatarMesNome(previsao.mes)}/${previsao.ano}</span>
+                    <span class="valor">${this.formatarMoeda(previsao.total)}</span>
+                    <span class="parcelas">${previsao.qtd}</span>
+                    <span class="detalhes">${detalheTexto || '-'}</span>
+                </div>
+            `;
+        });
+
+        detalhesHTML += `
+                    </div>
+                </div>
+            </div>
+        `;
+
+        this.mostrarModalDetalhes(detalhesHTML);
     }
 
     mostrarModalProximasFaturas(cartaoId) {
