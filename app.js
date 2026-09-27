@@ -14,7 +14,8 @@ class FinanceApp {
         this.filtrosAtivos = {
             status: 'todos',
             pessoa: 'todos',
-            data: ''
+            data: '',
+            tipo: 'todos'
         };
         this.chartGastosGanhos = null;
         this.chartCategorias = null;
@@ -139,10 +140,12 @@ class FinanceApp {
         const filtroStatus = document.getElementById('filtroStatus');
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
+        const filtroTipo = document.getElementById('filtroTipo');
 
         if (filtroStatus) filtroStatus.addEventListener('change', () => this.aplicarFiltros());
         if (filtroPessoa) filtroPessoa.addEventListener('change', () => this.aplicarFiltros());
         if (filtroData) filtroData.addEventListener('change', () => this.aplicarFiltros());
+        if (filtroTipo) filtroTipo.addEventListener('change', () => this.aplicarFiltros());
 
         console.log('✅ Eventos configurados!');
     }
@@ -937,11 +940,13 @@ class FinanceApp {
         const filtroStatus = document.getElementById('filtroStatus');
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
+        const filtroTipo = document.getElementById('filtroTipo');
 
         this.filtrosAtivos = {
             status: filtroStatus ? filtroStatus.value : 'todos',
             pessoa: filtroPessoa ? filtroPessoa.value : 'todos',
-            data: filtroData ? filtroData.value : ''
+            data: filtroData ? filtroData.value : '',
+            tipo: filtroTipo ? filtroTipo.value : 'todos'
         };
         this.atualizarListaTransacoes();
     }
@@ -950,12 +955,14 @@ class FinanceApp {
         const filtroStatus = document.getElementById('filtroStatus');
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
+        const filtroTipo = document.getElementById('filtroTipo');
 
         if (filtroStatus) filtroStatus.value = 'todos';
         if (filtroPessoa) filtroPessoa.value = 'todos';
         if (filtroData) filtroData.value = '';
-        
-        this.filtrosAtivos = { status: 'todos', pessoa: 'todos', data: '' };
+        if (filtroTipo) filtroTipo.value = 'todos';
+
+        this.filtrosAtivos = { status: 'todos', pessoa: 'todos', data: '', tipo: 'todos' };
         this.atualizarListaTransacoes();
     }
 
@@ -983,19 +990,23 @@ class FinanceApp {
     }
 
     // ========== ATUALIZAÇÕES DE INTERFACE ==========
+    // Ganhos/gastos pagos de um mês específico (ano, mês 0-indexado) — usado
+    // tanto pro resumo "real" do mês atual (alertas, previsões) quanto pro
+    // mês que o usuário está navegando no card do topo do Dashboard.
+    calcularResumoMes(ano, mes) {
+        const prefixo = `${ano}-${String(mes + 1).padStart(2, '0')}`;
+        const gastos = this.gastos
+            .filter(g => g.data.startsWith(prefixo) && g.pago)
+            .reduce((sum, g) => sum + g.valor, 0);
+        const ganhos = this.ganhos
+            .filter(g => g.data.startsWith(prefixo))
+            .reduce((sum, g) => sum + g.valor, 0);
+        return { ganhos, gastos, saldo: ganhos - gastos };
+    }
+
     atualizarDashboard() {
-        const mesAtual = new Date().toISOString().slice(0, 7);
-        
-        // REGRA 1: Só conta gastos pagos no mês
-        const gastosMes = this.gastos
-            .filter(g => g.data.startsWith(mesAtual) && g.pago)
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const ganhosMes = this.ganhos
-            .filter(g => g.data.startsWith(mesAtual))
-            .reduce((sum, g) => sum + g.valor, 0);
-
-        const saldoMes = ganhosMes - gastosMes;
+        const hoje = new Date();
+        const resumoAtual = this.calcularResumoMes(hoje.getFullYear(), hoje.getMonth());
         const saldoTotal = this.calcularSaldoTotal();
 
         // REGRA 6: Pendentes a pagar (meus gastos não pagos)
@@ -1012,18 +1023,81 @@ class FinanceApp {
             .filter(g => !g.pago && g.responsavel !== 'Eu')
             .reduce((sum, g) => sum + g.valor, 0);
 
-        // Atualizar elementos
-        this.atualizarElementoTexto('ganhos-mes', this.formatarMoeda(ganhosMes));
-        this.atualizarElementoTexto('gastos-mes', this.formatarMoeda(gastosMes));
-        this.atualizarElementoTexto('saldo-mes', this.formatarMoeda(saldoMes));
         this.atualizarElementoTexto('saldo', this.formatarMoeda(saldoTotal));
         this.atualizarElementoTexto('gastos-pendentes', this.formatarMoeda(gastosPendentes));
         this.atualizarElementoTexto('gastos-pagos', this.formatarMoeda(gastosPagados));
         this.atualizarElementoTexto('pendente-receber', this.formatarMoeda(pendenteReceber));
 
-        this.atualizarAlertas(ganhosMes, gastosMes, gastosPendentes, pendenteReceber);
+        // Alertas e previsão do fim do mês sempre com base no mês REAL de
+        // hoje, independente de qual mês o usuário esteja navegando nos
+        // cards de cima — não faz sentido alertar "previsão pro fim do mês"
+        // olhando pra um mês passado ou futuro.
+        this.atualizarAlertas(resumoAtual.ganhos, resumoAtual.gastos, gastosPendentes, pendenteReceber);
         this.atualizarStatsRapidos();
         this.atualizarPrevisaoPessoas(); // REGRA 7
+
+        this.atualizarResumoMesVisualizado();
+    }
+
+    // Mês/ano exibido nos cards de Ganhos/Gastos/Saldo e no gráfico do
+    // Dashboard — navegável com as setas, começa sempre no mês atual.
+    atualizarResumoMesVisualizado() {
+        if (!this.mesVisualizado) {
+            const hoje = new Date();
+            this.mesVisualizado = { ano: hoje.getFullYear(), mes: hoje.getMonth() };
+        }
+        const { ano, mes } = this.mesVisualizado;
+        const resumo = this.calcularResumoMes(ano, mes);
+        const hoje = new Date();
+        const ehMesAtual = ano === hoje.getFullYear() && mes === hoje.getMonth();
+        const sufixoLabel = ehMesAtual ? 'Este mês' : `${this.formatarMesNome(mes)}/${ano}`;
+
+        this.atualizarElementoTexto('ganhos-mes', this.formatarMoeda(resumo.ganhos));
+        this.atualizarElementoTexto('gastos-mes', this.formatarMoeda(resumo.gastos));
+        this.atualizarElementoTexto('saldo-mes', this.formatarMoeda(resumo.saldo));
+        this.atualizarElementoTexto('ganhos-mes-label', sufixoLabel);
+        this.atualizarElementoTexto('gastos-mes-label', sufixoLabel);
+        this.atualizarElementoTexto('saldo-mes-label', sufixoLabel);
+        this.atualizarElementoTexto('mes-visualizado-label', `${this.formatarMesNome(mes)} de ${ano}`);
+
+        this.renderizarGraficoMesVisualizado(resumo);
+    }
+
+    navegarMesVisualizado(delta) {
+        if (!this.mesVisualizado) {
+            const hoje = new Date();
+            this.mesVisualizado = { ano: hoje.getFullYear(), mes: hoje.getMonth() };
+        }
+        const d = new Date(this.mesVisualizado.ano, this.mesVisualizado.mes + delta, 1);
+        this.mesVisualizado = { ano: d.getFullYear(), mes: d.getMonth() };
+        this.atualizarResumoMesVisualizado();
+    }
+
+    renderizarGraficoMesVisualizado(resumo) {
+        const canvas = document.getElementById('graficoMesVisualizado');
+        if (!canvas || typeof Chart === 'undefined') return;
+        if (this.chartMesVisualizado) this.chartMesVisualizado.destroy();
+        try {
+            this.chartMesVisualizado = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: ['Ganhos', 'Gastos'],
+                    datasets: [{
+                        data: [resumo.ganhos, resumo.gastos],
+                        backgroundColor: ['#2ecc71', '#e74c3c'],
+                        borderColor: ['#27ae60', '#c0392b'],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { beginAtZero: true, ticks: { callback: value => 'R$ ' + value } } }
+                }
+            });
+        } catch (error) {
+            console.error('Erro ao gerar gráfico do mês visualizado:', error);
+        }
     }
 
     atualizarElementoTexto(id, texto) {
@@ -1282,6 +1356,10 @@ class FinanceApp {
         let transacoesFiltradas = [...this.gastos, ...this.ganhos];
 
         // Aplicar filtros
+        if (this.filtrosAtivos.tipo && this.filtrosAtivos.tipo !== 'todos') {
+            transacoesFiltradas = transacoesFiltradas.filter(t => t.tipo === this.filtrosAtivos.tipo);
+        }
+
         if (this.filtrosAtivos.status !== 'todos') {
             transacoesFiltradas = transacoesFiltradas.filter(t => {
                 if (t.tipo === 'ganho') return true;
@@ -2015,6 +2093,9 @@ class FinanceApp {
                         ${this.gerarPrevisaoFaturasCartao(cartao.id)}
                     </div>
                     <div class="card-actions">
+                        <button class="btn-icon" onclick="app.mostrarModalProximasFaturas(${cartao.id})" title="Ver próximas faturas">
+                            <i class="fas fa-calendar-days"></i>
+                        </button>
                         <button class="btn-icon success" onclick="app.mostrarModalPagarFatura(${cartao.id})" title="Pagar fatura">
                             <i class="fas fa-money-bill-wave"></i>
                         </button>
@@ -2322,6 +2403,70 @@ class FinanceApp {
         });
 
         overlay.querySelector('#pagarFaturaFechar').addEventListener('click', () => overlay.remove());
+    }
+
+    // ========== VER PRÓXIMAS FATURAS ==========
+    // Igual a obterFaturasNaoPagas, mas sem filtrar por responsável — aqui é
+    // o valor total que o banco vai cobrar (a fatura não sabe quem vai
+    // reembolsar quem depois), com a parte de cada um só como informação
+    // extra.
+    obterProximasFaturas(cartaoId) {
+        const grupos = new Map();
+        this.gastos
+            .filter(g => g.cartaoId === cartaoId && !g.pago)
+            .forEach(g => {
+                const d = this.parseDataLocal(g.data);
+                const chave = `${d.getFullYear()}-${d.getMonth()}`;
+                if (!grupos.has(chave)) {
+                    grupos.set(chave, { ano: d.getFullYear(), mes: d.getMonth(), dataVencimento: g.data, total: 0, totalMeu: 0, totalOutros: 0, qtd: 0 });
+                }
+                const grupo = grupos.get(chave);
+                grupo.total += g.valor;
+                grupo.qtd++;
+                if (g.responsavel === 'Eu') grupo.totalMeu += g.valor;
+                else grupo.totalOutros += g.valor;
+            });
+        return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
+    }
+
+    mostrarModalProximasFaturas(cartaoId) {
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return;
+
+        const faturas = this.obterProximasFaturas(cartaoId);
+        if (faturas.length === 0) {
+            this.mostrarToast('Não há lançamentos futuros pra esse cartão.', 'info');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(20,21,38,0.55); display: flex; align-items: center;
+            justify-content: center; z-index: 2000; padding: 20px; backdrop-filter: blur(6px);
+        `;
+        overlay.innerHTML = `
+            <div style="background: white; border-radius: 20px; max-width: 460px; width: 100%; padding: 22px; max-height: 86vh; overflow-y: auto;">
+                <h3 style="margin:0 0 16px;">📅 Próximas faturas — ${cartao.nome}</h3>
+                <div style="display:grid; gap:10px;">
+                    ${faturas.map(f => `
+                        <div style="border:1px solid #e6e7f0; border-radius:12px; padding:14px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <strong>${this.formatarMesNome(f.mes)}/${f.ano}</strong>
+                                <span style="font-weight:700;">${this.formatarMoeda(f.total)}</span>
+                            </div>
+                            <div style="color:#777; font-size:0.8em; margin-top:4px;">
+                                Vence ${this.formatarData(f.dataVencimento)} • ${f.qtd} lançamento(s)
+                                ${f.totalOutros > 0 ? `<br>Seu: ${this.formatarMoeda(f.totalMeu)} • De outras pessoas: ${this.formatarMoeda(f.totalOutros)}` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                <button id="proximasFaturasFechar" class="btn-outline" style="width:100%; margin-top:16px;">Fechar</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#proximasFaturasFechar').addEventListener('click', () => overlay.remove());
     }
 
     // ========== PREVISÃO DOS PRÓXIMOS MESES (gastos e ganhos) ==========

@@ -123,6 +123,16 @@
         <main class="main-content">
             <!-- Dashboard -->
             <div id="dashboard" class="tab-content active">
+                <div style="display:flex; align-items:center; justify-content:center; gap:16px; margin-bottom:14px;">
+                    <button class="btn-icon" onclick="app.navegarMesVisualizado(-1)" title="Mês anterior">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <strong id="mes-visualizado-label" style="min-width:150px; text-align:center;">—</strong>
+                    <button class="btn-icon" onclick="app.navegarMesVisualizado(1)" title="Próximo mês">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+
                 <div class="alertas-container" id="alertas">
                     <div class="alerta info">
                         <i class="fas fa-info-circle"></i>
@@ -135,19 +145,19 @@
                         <i class="fas fa-arrow-up"></i>
                         <h3>Ganhos</h3>
                         <span id="ganhos-mes">R$ 0,00</span>
-                        <small>Este mês</small>
+                        <small id="ganhos-mes-label">Este mês</small>
                     </div>
                     <div class="card gastos">
                         <i class="fas fa-arrow-down"></i>
                         <h3>Gastos</h3>
                         <span id="gastos-mes">R$ 0,00</span>
-                        <small>Este mês</small>
+                        <small id="gastos-mes-label">Este mês</small>
                     </div>
                     <div class="card saldo">
                         <i class="fas fa-wallet"></i>
                         <h3>Saldo</h3>
                         <span id="saldo-mes">R$ 0,00</span>
-                        <small>Este mês</small>
+                        <small id="saldo-mes-label">Este mês</small>
                     </div>
                     <div class="card pendentes">
                         <i class="fas fa-clock"></i>
@@ -167,6 +177,10 @@
                         <span id="gastos-pagos">R$ 0,00</span>
                         <small>Já pagos</small>
                     </div>
+                </div>
+
+                <div class="chart-card" style="margin: 14px 0;">
+                    <canvas id="graficoMesVisualizado" height="140"></canvas>
                 </div>
 
                 <form id="formLancamentoRapido" class="quick-add">
@@ -211,6 +225,11 @@
                 <div class="section-header">
                     <h2>Últimas Transações</h2>
                     <div class="filter-actions">
+                        <select id="filtroTipo" class="filter-select">
+                            <option value="todos">Ganhos e gastos</option>
+                            <option value="ganho">Só ganhos</option>
+                            <option value="gasto">Só gastos</option>
+                        </select>
                         <select id="filtroStatus" class="filter-select">
                             <option value="todos">Todos</option>
                             <option value="pendente">Pendentes</option>

@@ -622,14 +622,22 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
                 });
                 app.comprasCartao.push(novaCompra);
 
+                const responsavel = linha.responsavel || 'Eu';
+                // "Esta fatura já foi paga" quer dizer que EU já paguei o
+                // banco — não que a pessoa pra quem a compra foi atribuída já
+                // me reembolsou. São dois eventos diferentes: marcar a parte
+                // de outra pessoa como paga aqui faria a dívida sumir de "a
+                // receber" sem ela ter pago nada (mesmo cuidado já tomado em
+                // marcarFaturaComoPaga, no app.js).
+                const ehMinha = responsavel === 'Eu';
                 const novoGasto = await app.datastore.criar('gastos', {
                     descricao: `💳 ${linha.descricaoOriginal}`,
                     valor: linha.valor,
                     categoria: linha.categoria,
-                    responsavel: linha.responsavel || 'Eu',
+                    responsavel,
                     data: dataVencimento,
-                    pago: faturaPaga,
-                    dataPagamento: faturaPaga ? dataVencimento : null,
+                    pago: ehMinha && faturaPaga,
+                    dataPagamento: (ehMinha && faturaPaga) ? dataVencimento : null,
                     cartaoId,
                     compraCartaoId: novaCompra.id,
                     parcelaNumero: linha.parcelaNumero,
