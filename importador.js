@@ -203,7 +203,13 @@ async function parseInterPDF(arrayBuffer) {
     const inicio = new Uint8Array(arrayBuffer.slice(0, 1024));
     const textoInicio = String.fromCharCode(...inicio);
     if (!textoInicio.includes('%PDF-')) {
-        throw new Error(`O arquivo não parece ser um PDF (${arrayBuffer.byteLength} byte(s) lidos, assinatura "%PDF-" não encontrada). Confirme que escolheu o arquivo certo.`);
+        // Diagnóstico: mostra os primeiros bytes (em hex e como texto) pra
+        // entender o que realmente chegou, já que não dá pra reproduzir o
+        // comportamento exato do seletor de arquivo do iOS por fora dele.
+        const primeirosBytes = Array.from(inicio.slice(0, 64));
+        const hex = primeirosBytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+        const textoLegivel = primeirosBytes.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('');
+        throw new Error(`O arquivo não parece ser um PDF (${arrayBuffer.byteLength} byte(s) lidos, assinatura "%PDF-" não encontrada nos primeiros 1024 bytes).\n\nPrimeiros bytes (hex): ${hex}\nComo texto: ${textoLegivel}\n\nTire um print desta mensagem e me mande — isso vai mostrar o que realmente está chegando.`);
     }
 
     const linhas = await extrairLinhasDoPDF(arrayBuffer);
@@ -301,7 +307,7 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
                     <input type="checkbox" id="importFaturaPaga" style="width:auto;">
                     <label for="importFaturaPaga" style="margin:0;">Esta fatura já foi paga</label>
                 </div>
-                <div id="importErro" style="display:none; color:#e11d48; margin-bottom:12px; font-size:0.9em;"></div>
+                <div id="importErro" style="display:none; color:#e11d48; margin-bottom:12px; font-size:0.9em; white-space:pre-wrap; word-break:break-all;"></div>
                 <button id="importAnalisar" class="btn-primary" style="width:100%;">Analisar arquivo</button>
             </div>
             <div id="importPasso2" style="display:none; padding: 0 22px 22px;">
