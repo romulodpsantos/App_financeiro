@@ -2015,6 +2015,9 @@ class FinanceApp {
                         ${this.gerarPrevisaoFaturasCartao(cartao.id)}
                     </div>
                     <div class="card-actions">
+                        <button class="btn-icon success" onclick="app.mostrarModalPagarFatura(${cartao.id})" title="Pagar fatura">
+                            <i class="fas fa-money-bill-wave"></i>
+                        </button>
                         <button class="btn-icon success" onclick="app.mostrarModalConferirOrcamento(${cartao.id})" title="Conferir orçamento da fatura em aberto">
                             <i class="fas fa-scale-balanced"></i>
                         </button>
@@ -2221,6 +2224,221 @@ class FinanceApp {
     formatarMesNome(mes) {
         const meses = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
         return meses[mes];
+    }
+
+    // ========== PAGAR FATURA INTEIRA ==========
+    // Agrupa por mês de vencimento os gastos do cartão que são "meus" (não de
+    // outra pessoa) e ainda não foram pagos — cada grupo é uma fatura em
+    // aberto. Gastos de outras pessoas ficam de fora de propósito: o banco
+    // cobra o valor total na fatura independente de quem vai reembolsar
+    // depois, mas "a pessoa já me pagou" é um evento separado de "eu paguei o
+    // banco" — continuam aparecendo em "a receber" até serem quitados à parte.
+    obterFaturasNaoPagas(cartaoId) {
+        const grupos = new Map();
+        this.gastos
+            .filter(g => g.cartaoId === cartaoId && !g.pago && g.responsavel === 'Eu')
+            .forEach(g => {
+                const d = this.parseDataLocal(g.data);
+                const chave = `${d.getFullYear()}-${d.getMonth()}`;
+                if (!grupos.has(chave)) {
+                    grupos.set(chave, { ano: d.getFullYear(), mes: d.getMonth(), dataVencimento: g.data, gastos: [], total: 0 });
+                }
+                const grupo = grupos.get(chave);
+                grupo.gastos.push(g);
+                grupo.total += g.valor;
+            });
+        return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
+    }
+
+    async marcarFaturaComoPaga(cartaoId, ano, mes) {
+        const dataPagamento = new Date().toISOString().split('T')[0];
+        const gastosDaFatura = this.gastos.filter(g => {
+            if (g.cartaoId !== cartaoId || g.pago || g.responsavel !== 'Eu') return false;
+            const d = this.parseDataLocal(g.data);
+            return d.getFullYear() === ano && d.getMonth() === mes;
+        });
+        if (gastosDaFatura.length === 0) return;
+
+        try {
+            for (const gasto of gastosDaFatura) {
+                await this.datastore.atualizar('gastos', gasto.id, { pago: true, dataPagamento });
+                gasto.pago = true;
+                gasto.dataPagamento = dataPagamento;
+            }
+            this.mostrarToast(`Fatura paga! ${gastosDaFatura.length} lançamento(s) atualizado(s).`, 'success');
+            this.refreshCompleto();
+        } catch (err) {
+            this.tratarErroPersistencia(err);
+        }
+    }
+
+    mostrarModalPagarFatura(cartaoId) {
+        const cartao = this.cartoes.find(c => c.id === cartaoId);
+        if (!cartao) return;
+
+        const faturas = this.obterFaturasNaoPagas(cartaoId);
+        if (faturas.length === 0) {
+            this.mostrarToast('Não há fatura em aberto pra pagar nesse cartão.', 'info');
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(20,21,38,0.55); display: flex; align-items: center;
+            justify-content: center; z-index: 2000; padding: 20px; backdrop-filter: blur(6px);
+        `;
+        overlay.innerHTML = `
+            <div style="background: white; border-radius: 20px; max-width: 460px; width: 100%; padding: 22px; max-height: 86vh; overflow-y: auto;">
+                <h3 style="margin:0 0 6px;">💰 Pagar fatura — ${cartao.nome}</h3>
+                <p style="color:#555; margin-bottom:16px; font-size:0.85em;">
+                    Marca todos os seus lançamentos daquele mês como pagos de uma vez. Gastos de outras pessoas continuam em "a receber" separadamente.
+                </p>
+                <div id="pagarFaturaLista" style="display:grid; gap:10px;"></div>
+                <button id="pagarFaturaFechar" class="btn-outline" style="width:100%; margin-top:16px;">Fechar</button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const listaEl = overlay.querySelector('#pagarFaturaLista');
+        listaEl.innerHTML = faturas.map((f, i) => `
+            <div style="border:1px solid #e6e7f0; border-radius:12px; padding:14px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                <div>
+                    <div style="font-weight:700;">${this.formatarMesNome(f.mes)}/${f.ano} — vence ${this.formatarData(f.dataVencimento)}</div>
+                    <div style="color:#777; font-size:0.85em;">${f.gastos.length} lançamento(s) • ${this.formatarMoeda(f.total)}</div>
+                </div>
+                <button class="btn-primary" data-idx="${i}" style="white-space:nowrap;">Marcar como paga</button>
+            </div>
+        `).join('');
+
+        listaEl.querySelectorAll('button[data-idx]').forEach((botao) => {
+            botao.addEventListener('click', async () => {
+                const f = faturas[parseInt(botao.dataset.idx)];
+                botao.disabled = true;
+                botao.textContent = 'Pagando...';
+                await this.marcarFaturaComoPaga(cartaoId, f.ano, f.mes);
+                overlay.remove();
+            });
+        });
+
+        overlay.querySelector('#pagarFaturaFechar').addEventListener('click', () => overlay.remove());
+    }
+
+    // ========== PREVISÃO DOS PRÓXIMOS MESES (gastos e ganhos) ==========
+    // Junta três fontes de previsão numa única linha do tempo, mês a mês:
+    //  - Fatura de cartão: parcelas já lançadas (compras à vista/parceladas
+    //    já geram o gasto de cada mês futuro no momento da compra/import).
+    //  - Recebimento: gastos de outras pessoas ainda não pagos (dinheiro que
+    //    vai entrar quando elas acertarem comigo) — entra do lado dos ganhos.
+    //  - Recorrente: fixo (repete todo mês enquanto ativo) e parcelado (só as
+    //    parcelas que ainda faltam, contando a partir de `parcelasPagas`) —
+    //    projetados aqui porque hoje só o mês de criação vira gasto de
+    //    verdade; os meses seguintes de um recorrente "Eu" não são gerados
+    //    automaticamente, então sem essa projeção eles não apareceriam.
+    calcularProjecaoProximosMeses(numMeses = 6) {
+        const hoje = new Date();
+        const inicioMesAtual = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+        const meses = [];
+        for (let i = 0; i < numMeses; i++) {
+            const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+            meses.push({
+                mes: d.getMonth(),
+                ano: d.getFullYear(),
+                label: `${this.formatarMesNome(d.getMonth())}/${d.getFullYear()}`,
+                gastosPrevistos: 0,
+                ganhosPrevistos: 0,
+                detalhes: []
+            });
+        }
+        const achaMes = (mes, ano) => meses.find(m => m.mes === mes && m.ano === ano);
+
+        // 1) Meus gastos já lançados e não pagos (fatura de cartão, parcelas
+        // de recorrente já geradas, avulsos com vencimento futuro).
+        this.gastos.filter(g => !g.pago && g.responsavel === 'Eu').forEach(g => {
+            const d = this.parseDataLocal(g.data);
+            const alvo = achaMes(d.getMonth(), d.getFullYear());
+            if (!alvo) return;
+            alvo.gastosPrevistos += g.valor;
+            alvo.detalhes.push({ tipo: 'gasto', origem: g.cartaoId ? 'fatura' : (g.recorrenteId ? 'recorrente' : 'avulso'), descricao: g.descricao, valor: g.valor });
+        });
+
+        // 2) A receber de outras pessoas (ainda não pago) — lado dos ganhos.
+        this.gastos.filter(g => !g.pago && g.responsavel !== 'Eu').forEach(g => {
+            const d = this.parseDataLocal(g.data);
+            const alvo = achaMes(d.getMonth(), d.getFullYear());
+            if (!alvo) return;
+            alvo.ganhosPrevistos += g.valor;
+            alvo.detalhes.push({ tipo: 'ganho', origem: 'recebimento', descricao: `${g.descricao} (${g.responsavel})`, valor: g.valor });
+        });
+
+        // 3) Ganhos futuros já cadastrados manualmente com antecedência.
+        this.ganhos.forEach(gh => {
+            const d = this.parseDataLocal(gh.data);
+            if (d < inicioMesAtual) return;
+            const alvo = achaMes(d.getMonth(), d.getFullYear());
+            if (!alvo) return;
+            alvo.ganhosPrevistos += gh.valor;
+            alvo.detalhes.push({ tipo: 'ganho', origem: 'ganho', descricao: gh.descricao, valor: gh.valor });
+        });
+
+        // 4) Recorrentes "Eu" ativos, projetando ocorrências futuras que
+        // ainda não viraram gasto de verdade.
+        this.recorrentes.filter(r => r.ativo && r.responsavel === 'Eu').forEach(r => {
+            const dataInicio = this.parseDataLocal(r.dataInicio);
+            const jaExisteGastoNoMes = (recorrenteId, mes, ano) => this.gastos.some(g => {
+                if (g.recorrenteId !== recorrenteId) return false;
+                const d = this.parseDataLocal(g.data);
+                return d.getMonth() === mes && d.getFullYear() === ano;
+            });
+
+            if (r.tipo === 'fixo') {
+                meses.forEach((alvo) => {
+                    const dataAlvo = new Date(alvo.ano, alvo.mes, 1);
+                    if (dataAlvo < new Date(dataInicio.getFullYear(), dataInicio.getMonth(), 1)) return;
+                    if (jaExisteGastoNoMes(r.id, alvo.mes, alvo.ano)) return;
+                    alvo.gastosPrevistos += r.valor;
+                    alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: `${r.descricao} (recorrente)`, valor: r.valor });
+                });
+            } else if (r.tipo === 'parcelado' && r.parcelas) {
+                const restantes = r.parcelas - (r.parcelasPagas || 0);
+                for (let i = 1; i <= restantes; i++) {
+                    const numeroParcela = (r.parcelasPagas || 0) + i;
+                    const dataParcela = this.parseDataLocal(this.calcularDataParcela(r.dataInicio, numeroParcela));
+                    const alvo = achaMes(dataParcela.getMonth(), dataParcela.getFullYear());
+                    if (!alvo) continue;
+                    if (jaExisteGastoNoMes(r.id, alvo.mes, alvo.ano)) continue;
+                    alvo.gastosPrevistos += r.valor;
+                    alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: `${r.descricao} (parcela ${numeroParcela}/${r.parcelas})`, valor: r.valor });
+                }
+            }
+        });
+
+        meses.forEach(m => { m.saldoPrevisto = m.ganhosPrevistos - m.gastosPrevistos; });
+        return meses;
+    }
+
+    atualizarProjecaoMeses() {
+        const container = document.getElementById('previsao-proximos-meses');
+        if (!container) return;
+
+        const meses = this.calcularProjecaoProximosMeses(6);
+        container.innerHTML = meses.map(m => `
+            <div class="chart-card" style="padding:14px;">
+                <div style="font-weight:700; margin-bottom:8px;">${m.label}</div>
+                <div style="display:flex; justify-content:space-between; font-size:0.85em; margin-bottom:4px;">
+                    <span style="color:#16a34a;">Ganhos previstos</span>
+                    <span style="color:#16a34a; font-weight:600;">${this.formatarMoeda(m.ganhosPrevistos)}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; font-size:0.85em; margin-bottom:8px;">
+                    <span style="color:#dc2626;">Gastos previstos</span>
+                    <span style="color:#dc2626; font-weight:600;">${this.formatarMoeda(m.gastosPrevistos)}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; padding-top:8px; border-top:1px solid #e6e7f0; font-weight:700;">
+                    <span>Saldo previsto</span>
+                    <span style="color:${m.saldoPrevisto >= 0 ? '#16a34a' : '#dc2626'};">${this.formatarMoeda(m.saldoPrevisto)}</span>
+                </div>
+            </div>
+        `).join('');
     }
 
     atualizarStatsCartoes() {
@@ -2630,7 +2848,8 @@ class FinanceApp {
         this.atualizarListaCartoes();
         this.atualizarListaComprasCartao();
         this.carregarSelectCartoes();
-        
+        this.atualizarProjecaoMeses();
+
         if (document.getElementById('reports') && document.getElementById('reports').classList.contains('active')) {
             setTimeout(() => this.gerarGraficos(), 100);
         }
