@@ -1,5 +1,5 @@
 // sw.js - Service Worker para PWA Offline
-const CACHE_NAME = 'controle-financeiro-v5.0';
+const CACHE_NAME = 'controle-financeiro-v5.1';
 const urlsToCache = [
   '/',
   '/index.html',

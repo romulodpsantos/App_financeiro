@@ -13,14 +13,35 @@
 // Lê um arquivo como ArrayBuffer via FileReader (mais compatível que
 // File.arrayBuffer() em alguns navegadores mobile, principalmente Safari/iOS,
 // que já teve bugs devolvendo o buffer incompleto/corrompido pra arquivos
-// vindos do app Arquivos/iCloud).
-function lerArquivoComoArrayBuffer(arquivo) {
+// vindos do app Arquivos/iCloud). Ainda assim, o FileReader pode terminar
+// "com sucesso" mas devolver menos bytes do que o arquivo realmente tem —
+// por isso conferimos o tamanho contra `arquivo.size` e tentamos de novo
+// automaticamente antes de desistir (é exatamente esse tipo de leitura
+// truncada que faz o PDF.js quebrar com "Invalid PDF structure": o começo
+// do arquivo vem certo, então passa numa checagem só do cabeçalho, mas falta
+// o fim do arquivo que o PDF.js precisa pra achar a tabela de referências).
+function lerArquivoComoArrayBufferUmaVez(arquivo) {
     return new Promise((resolve, reject) => {
         const leitor = new FileReader();
         leitor.onload = () => resolve(leitor.result);
         leitor.onerror = () => reject(leitor.error || new Error('Falha ao ler o arquivo.'));
         leitor.readAsArrayBuffer(arquivo);
     });
+}
+
+async function lerArquivoComoArrayBuffer(arquivo, tentativas = 3) {
+    let ultimoTamanho = null;
+    for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+        const buffer = await lerArquivoComoArrayBufferUmaVez(arquivo);
+        if (buffer.byteLength === arquivo.size) {
+            return buffer;
+        }
+        ultimoTamanho = buffer.byteLength;
+        // Leitura veio truncada — espera um instante e tenta de novo antes
+        // de desistir (comum em iCloud/Arquivos no iOS na primeira tentativa).
+        await new Promise((r) => setTimeout(r, 300));
+    }
+    throw new Error(`O arquivo foi lido incompleto (${ultimoTamanho} de ${arquivo.size} bytes esperados) mesmo após ${tentativas} tentativas. Tente escolher o arquivo de novo, ou copiar o PDF pro app Fotos/Arquivos local antes de importar.`);
 }
 
 // ---- Parsing de CSV (com suporte a campos entre aspas) ----
