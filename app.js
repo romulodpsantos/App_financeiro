@@ -1017,6 +1017,41 @@ class FinanceApp {
         });
     }
 
+    // Recorrentes "Eu" ativos (fixo ou parcelado) que ainda não geraram um
+    // gasto de verdade num mês específico — hoje só o mês de CRIAÇÃO do
+    // recorrente vira gasto automaticamente (gerarTransacaoRecorrente só
+    // roda uma vez, na criação); os meses seguintes nunca são gerados
+    // sozinhos. Usado tanto pelo resumo do Dashboard quanto pela previsão
+    // dos próximos meses, pra não duplicar essa lógica em dois lugares.
+    listarGastosRecorrentesSinteticosNoMes(ano, mes) {
+        const resultado = [];
+        const dataAlvo = new Date(ano, mes, 1);
+        this.recorrentes.filter(r => r.ativo && r.responsavel === 'Eu').forEach((r) => {
+            const dataInicio = this.parseDataLocal(r.dataInicio);
+            const jaExisteGastoNoMes = () => this.gastos.some(g => {
+                if (g.recorrenteId !== r.id) return false;
+                const d = this.parseDataLocal(g.data);
+                return d.getMonth() === mes && d.getFullYear() === ano;
+            });
+
+            if (r.tipo === 'fixo') {
+                if (dataAlvo < new Date(dataInicio.getFullYear(), dataInicio.getMonth(), 1)) return;
+                if (jaExisteGastoNoMes()) return;
+                resultado.push({ recorrenteId: r.id, descricao: `${r.descricao} (recorrente)`, valor: r.valor });
+            } else if (r.tipo === 'parcelado' && r.parcelas) {
+                const restantes = r.parcelas - (r.parcelasPagas || 0);
+                for (let i = 1; i <= restantes; i++) {
+                    const numeroParcela = (r.parcelasPagas || 0) + i;
+                    const dataParcela = this.parseDataLocal(this.calcularDataParcela(r.dataInicio, numeroParcela));
+                    if (dataParcela.getMonth() !== mes || dataParcela.getFullYear() !== ano) continue;
+                    if (jaExisteGastoNoMes()) continue;
+                    resultado.push({ recorrenteId: r.id, descricao: `${r.descricao} (parcela ${numeroParcela}/${r.parcelas})`, valor: r.valor });
+                }
+            }
+        });
+        return resultado;
+    }
+
     calcularResumoMes(ano, mes) {
         const prefixo = `${ano}-${String(mes + 1).padStart(2, '0')}`;
         const gastosDoMes = this.gastos.filter(g => g.data.startsWith(prefixo));
@@ -1027,11 +1062,24 @@ class FinanceApp {
             .reduce((sum, g) => sum + g.valor, 0);
         const ganhos = ganhosDiretos + ganhosRecorrentes;
         const gastos = gastosDoMes.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
-        // Meus gastos ainda não pagos nesse mês — visão separada do que é só
-        // meu (independente de quem mais está na fatura).
-        const pendentes = gastosDoMes.filter(g => !g.pago && g.responsavel === 'Eu').reduce((sum, g) => sum + g.valor, 0);
-        // De outras pessoas, ainda não pago (dinheiro que vai entrar depois).
-        const aReceber = gastosDoMes.filter(g => !g.pago && g.responsavel !== 'Eu').reduce((sum, g) => sum + g.valor, 0);
+
+        // Meus gastos ainda não pagos nesse mês — reais + sintetizados
+        // (recorrentes que ainda não geraram o lançamento de verdade nesse
+        // mês, e parcelas futuras de fatura de cartão importada que a fatura
+        // ainda não trouxe). Visão separada do que é só meu, independente de
+        // quem mais está na fatura.
+        let pendentes = gastosDoMes.filter(g => !g.pago && g.responsavel === 'Eu').reduce((sum, g) => sum + g.valor, 0);
+        pendentes += this.listarGastosRecorrentesSinteticosNoMes(ano, mes).reduce((sum, g) => sum + g.valor, 0);
+
+        // De outras pessoas, ainda não pago (dinheiro que vai entrar depois)
+        // — reais + parcelas futuras de cartão que ainda não têm gasto real.
+        let aReceber = gastosDoMes.filter(g => !g.pago && g.responsavel !== 'Eu').reduce((sum, g) => sum + g.valor, 0);
+        this.listarParcelasFuturasNaoGeradas().forEach((p) => {
+            if (p.ano !== ano || p.mes !== mes) return;
+            if (p.responsavel === 'Eu') pendentes += p.valor;
+            else aReceber += p.valor;
+        });
+
         // O banco cobra o total da fatura de mim, não importa de quem é cada
         // compra — pra saber se "o dinheiro vai dar", o que precisa sair do
         // bolso é o total (meu + de outras pessoas), não só a minha parte.
@@ -2633,35 +2681,14 @@ class FinanceApp {
         });
 
         // 4) Recorrentes "Eu" ativos, projetando ocorrências futuras que
-        // ainda não viraram gasto de verdade.
-        this.recorrentes.filter(r => r.ativo && r.responsavel === 'Eu').forEach(r => {
-            const dataInicio = this.parseDataLocal(r.dataInicio);
-            const jaExisteGastoNoMes = (recorrenteId, mes, ano) => this.gastos.some(g => {
-                if (g.recorrenteId !== recorrenteId) return false;
-                const d = this.parseDataLocal(g.data);
-                return d.getMonth() === mes && d.getFullYear() === ano;
+        // ainda não viraram gasto de verdade (mesma função usada pelo
+        // resumo do Dashboard, listarGastosRecorrentesSinteticosNoMes, pra
+        // não duplicar essa lógica em dois lugares e desalinhar depois).
+        meses.forEach((alvo) => {
+            this.listarGastosRecorrentesSinteticosNoMes(alvo.ano, alvo.mes).forEach((g) => {
+                alvo.gastosPrevistos += g.valor;
+                alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: g.descricao, valor: g.valor });
             });
-
-            if (r.tipo === 'fixo') {
-                meses.forEach((alvo) => {
-                    const dataAlvo = new Date(alvo.ano, alvo.mes, 1);
-                    if (dataAlvo < new Date(dataInicio.getFullYear(), dataInicio.getMonth(), 1)) return;
-                    if (jaExisteGastoNoMes(r.id, alvo.mes, alvo.ano)) return;
-                    alvo.gastosPrevistos += r.valor;
-                    alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: `${r.descricao} (recorrente)`, valor: r.valor });
-                });
-            } else if (r.tipo === 'parcelado' && r.parcelas) {
-                const restantes = r.parcelas - (r.parcelasPagas || 0);
-                for (let i = 1; i <= restantes; i++) {
-                    const numeroParcela = (r.parcelasPagas || 0) + i;
-                    const dataParcela = this.parseDataLocal(this.calcularDataParcela(r.dataInicio, numeroParcela));
-                    const alvo = achaMes(dataParcela.getMonth(), dataParcela.getFullYear());
-                    if (!alvo) continue;
-                    if (jaExisteGastoNoMes(r.id, alvo.mes, alvo.ano)) continue;
-                    alvo.gastosPrevistos += r.valor;
-                    alvo.detalhes.push({ tipo: 'gasto', origem: 'recorrente', descricao: `${r.descricao} (parcela ${numeroParcela}/${r.parcelas})`, valor: r.valor });
-                }
-            }
         });
 
         // 5) Compras de cartão importadas com parcelas futuras que a fatura
