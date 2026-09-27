@@ -29,17 +29,34 @@ function lerArquivoComoArrayBufferUmaVez(arquivo) {
     });
 }
 
-async function lerArquivoComoArrayBuffer(arquivo, tentativas = 3) {
+// Um arquivo do iCloud Drive que ainda não terminou de baixar pro aparelho
+// pode ser entregue pelo iOS com o TAMANHO certo (metadado da nuvem) mas o
+// CONTEÚDO todo zerado (o "espaço reservado" do arquivo, sem os bytes reais
+// ainda sincronizados). Isso passa despercebido por uma checagem só de
+// tamanho — por isso conferimos também se os primeiros bytes não são todos
+// zero antes de aceitar a leitura como válida.
+function pareceConteudoVazio(buffer) {
+    const amostra = new Uint8Array(buffer.slice(0, Math.min(4096, buffer.byteLength)));
+    return amostra.length > 0 && amostra.every((b) => b === 0);
+}
+
+async function lerArquivoComoArrayBuffer(arquivo, tentativas = 4) {
     let ultimoTamanho = null;
+    let ultimaLeituraVazia = false;
     for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
         const buffer = await lerArquivoComoArrayBufferUmaVez(arquivo);
-        if (buffer.byteLength === arquivo.size) {
+        ultimoTamanho = buffer.byteLength;
+        ultimaLeituraVazia = pareceConteudoVazio(buffer);
+        if (buffer.byteLength === arquivo.size && !ultimaLeituraVazia) {
             return buffer;
         }
-        ultimoTamanho = buffer.byteLength;
-        // Leitura veio truncada — espera um instante e tenta de novo antes
-        // de desistir (comum em iCloud/Arquivos no iOS na primeira tentativa).
-        await new Promise((r) => setTimeout(r, 300));
+        // Leitura truncada ou com conteúdo vazio (placeholder do iCloud
+        // ainda baixando) — espera um pouco mais a cada tentativa antes de
+        // tentar de novo.
+        await new Promise((r) => setTimeout(r, 500 * tentativa));
+    }
+    if (ultimaLeituraVazia) {
+        throw new Error(`Este arquivo parece ainda não ter sido baixado do iCloud pro seu iPhone (o tamanho está certo, mas o conteúdo veio vazio). Abra o arquivo no app Arquivos primeiro (toque nele e espere carregar, sem o ícone de nuvem), depois volte aqui e escolha ele de novo.`);
     }
     throw new Error(`O arquivo foi lido incompleto (${ultimoTamanho} de ${arquivo.size} bytes esperados) mesmo após ${tentativas} tentativas. Tente escolher o arquivo de novo, ou copiar o PDF pro app Fotos/Arquivos local antes de importar.`);
 }
