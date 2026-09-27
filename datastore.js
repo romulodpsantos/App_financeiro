@@ -46,7 +46,8 @@ const TABELAS = {
             valor: { db: 'valor_centavos', toDb: paraCentavos, fromDb: paraReais },
             data: 'data',
             origem: 'origem',
-            pessoaOrigem: 'pessoa_origem'
+            pessoaOrigem: 'pessoa_origem',
+            recorrente: 'recorrente'
         }
     },
     cartoes: {

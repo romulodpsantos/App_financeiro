@@ -391,6 +391,7 @@ class FinanceApp {
         const descricao = document.getElementById('descricaoGanho');
         const valor = document.getElementById('valorGanho');
         const data = document.getElementById('dataGanho');
+        const recorrente = document.getElementById('ganhoRecorrente');
 
         if (!descricao || !valor || !data) {
             this.mostrarToast('Erro: Elementos do formulário não encontrados!', 'error');
@@ -403,7 +404,12 @@ class FinanceApp {
         }
 
         const idExistente = id.value ? parseInt(id.value) : null;
-        const campos = { descricao: descricao.value, valor: parseFloat(valor.value), data: data.value };
+        const campos = {
+            descricao: descricao.value,
+            valor: parseFloat(valor.value),
+            data: data.value,
+            recorrente: recorrente ? recorrente.checked : false
+        };
 
         try {
             if (idExistente) {
@@ -430,12 +436,14 @@ class FinanceApp {
             const descricaoElement = document.getElementById('descricaoGanho');
             const valorElement = document.getElementById('valorGanho');
             const dataElement = document.getElementById('dataGanho');
+            const recorrenteElement = document.getElementById('ganhoRecorrente');
 
             if (idElement) idElement.value = ganho.id;
             if (descricaoElement) descricaoElement.value = ganho.descricao;
             if (valorElement) valorElement.value = ganho.valor;
             if (dataElement) dataElement.value = ganho.data;
-            
+            if (recorrenteElement) recorrenteElement.checked = !!ganho.recorrente;
+
             mostrarModal('ganho');
         }
     }
@@ -995,22 +1003,44 @@ class FinanceApp {
     // gastos já pagos, saldo, e o que ainda está em aberto naquele mês —
     // usado tanto pro resumo "real" do mês atual (alertas, previsões) quanto
     // pro mês que o usuário está navegando no topo do Dashboard.
+    // Ganhos marcados como recorrentes (salário, aluguel recebido, etc.)
+    // continuam contando em todo mês DEPOIS do mês em que foram cadastrados
+    // — o mês original já é contado direto (é um lançamento de verdade), os
+    // seguintes são só projetados aqui pra exibição, sem gravar nada novo.
+    listarGanhosRecorrentesNoMes(ano, mes) {
+        const inicioMesAlvo = new Date(ano, mes, 1);
+        return this.ganhos.filter((gh) => {
+            if (!gh.recorrente) return false;
+            const origem = this.parseDataLocal(gh.data);
+            const inicioMesOrigem = new Date(origem.getFullYear(), origem.getMonth(), 1);
+            return inicioMesAlvo > inicioMesOrigem;
+        });
+    }
+
     calcularResumoMes(ano, mes) {
         const prefixo = `${ano}-${String(mes + 1).padStart(2, '0')}`;
         const gastosDoMes = this.gastos.filter(g => g.data.startsWith(prefixo));
-        const ganhos = this.ganhos
+        const ganhosDiretos = this.ganhos
             .filter(g => g.data.startsWith(prefixo))
             .reduce((sum, g) => sum + g.valor, 0);
+        const ganhosRecorrentes = this.listarGanhosRecorrentesNoMes(ano, mes)
+            .reduce((sum, g) => sum + g.valor, 0);
+        const ganhos = ganhosDiretos + ganhosRecorrentes;
         const gastos = gastosDoMes.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
-        // Meus gastos ainda não pagos nesse mês (o que eu tenho que pagar).
+        // Meus gastos ainda não pagos nesse mês — visão separada do que é só
+        // meu (independente de quem mais está na fatura).
         const pendentes = gastosDoMes.filter(g => !g.pago && g.responsavel === 'Eu').reduce((sum, g) => sum + g.valor, 0);
-        // De outras pessoas, ainda não pago (dinheiro que vai entrar).
+        // De outras pessoas, ainda não pago (dinheiro que vai entrar depois).
         const aReceber = gastosDoMes.filter(g => !g.pago && g.responsavel !== 'Eu').reduce((sum, g) => sum + g.valor, 0);
+        // O banco cobra o total da fatura de mim, não importa de quem é cada
+        // compra — pra saber se "o dinheiro vai dar", o que precisa sair do
+        // bolso é o total (meu + de outras pessoas), não só a minha parte.
+        const pendentesTotal = pendentes + aReceber;
         return {
-            ganhos, gastos, pendentes, aReceber,
+            ganhos, gastos, pendentes, aReceber, pendentesTotal,
             saldo: ganhos - gastos,
             entradasPrevistas: ganhos + aReceber,
-            saidasPrevistas: gastos + pendentes
+            saidasPrevistas: gastos + pendentesTotal
         };
     }
 
@@ -2544,14 +2574,21 @@ class FinanceApp {
         }
         const achaMes = (mes, ano) => meses.find(m => m.mes === mes && m.ano === ano);
 
-        // 1) Meus gastos já lançados e não pagos (fatura de cartão, parcelas
-        // de recorrente já geradas, avulsos com vencimento futuro).
-        this.gastos.filter(g => !g.pago && g.responsavel === 'Eu').forEach(g => {
+        // 1) Todos os gastos já lançados e não pagos, meus e de outras
+        // pessoas (fatura de cartão, parcelas de recorrente já geradas,
+        // avulsos com vencimento futuro). O banco cobra o total de mim
+        // independente de quem é cada compra — pra saber se "o dinheiro vai
+        // dar" precisa contar o total que sai do bolso, não só a minha parte
+        // (a parte de outras pessoas volta como ganho no passo 2, quando
+        // elas me reembolsarem).
+        this.gastos.filter(g => !g.pago).forEach(g => {
             const d = this.parseDataLocal(g.data);
             const alvo = achaMes(d.getMonth(), d.getFullYear());
             if (!alvo) return;
+            const origem = g.cartaoId ? 'fatura' : (g.recorrenteId ? 'recorrente' : 'avulso');
+            const sufixo = g.responsavel !== 'Eu' ? ` (${g.responsavel})` : '';
             alvo.gastosPrevistos += g.valor;
-            alvo.detalhes.push({ tipo: 'gasto', origem: g.cartaoId ? 'fatura' : (g.recorrenteId ? 'recorrente' : 'avulso'), descricao: g.descricao, valor: g.valor });
+            alvo.detalhes.push({ tipo: 'gasto', origem, descricao: `${g.descricao}${sufixo}`, valor: g.valor });
         });
 
         // 2) A receber de outras pessoas (ainda não pago) — lado dos ganhos.
@@ -2563,7 +2600,9 @@ class FinanceApp {
             alvo.detalhes.push({ tipo: 'ganho', origem: 'recebimento', descricao: `${g.descricao} (${g.responsavel})`, valor: g.valor });
         });
 
-        // 3) Ganhos futuros já cadastrados manualmente com antecedência.
+        // 3) Ganhos futuros já cadastrados manualmente com antecedência, mais
+        // ganhos recorrentes (salário, aluguel recebido) projetados em todo
+        // mês seguinte ao que foram cadastrados.
         this.ganhos.forEach(gh => {
             const d = this.parseDataLocal(gh.data);
             if (d < inicioMesAtual) return;
@@ -2571,6 +2610,12 @@ class FinanceApp {
             if (!alvo) return;
             alvo.ganhosPrevistos += gh.valor;
             alvo.detalhes.push({ tipo: 'ganho', origem: 'ganho', descricao: gh.descricao, valor: gh.valor });
+        });
+        meses.forEach((alvo) => {
+            this.listarGanhosRecorrentesNoMes(alvo.ano, alvo.mes).forEach((gh) => {
+                alvo.ganhosPrevistos += gh.valor;
+                alvo.detalhes.push({ tipo: 'ganho', origem: 'ganho-recorrente', descricao: `${gh.descricao} (recorrente)`, valor: gh.valor });
+            });
         });
 
         // 4) Recorrentes "Eu" ativos, projetando ocorrências futuras que

@@ -163,7 +163,7 @@
                         <i class="fas fa-clock"></i>
                         <h3>Pendentes</h3>
                         <span id="gastos-pendentes">R$ 0,00</span>
-                        <small>A pagar</small>
+                        <small>Minha parte a pagar</small>
                     </div>
                     <div class="card pendentes-receber">
                         <i class="fas fa-hand-holding-usd"></i>
@@ -185,7 +185,7 @@
                         <div id="entradas-previstas-mes" style="font-size:1.3em; font-weight:700; color:#16a34a;">R$ 0,00</div>
                     </div>
                     <div>
-                        <div style="color:#dc2626; font-size:0.85em; font-weight:600;">Sai (pago + a pagar)</div>
+                        <div style="color:#dc2626; font-size:0.85em; font-weight:600;">Sai (pago + a pagar, todo mundo)</div>
                         <div id="saidas-previstas-mes" style="font-size:1.3em; font-weight:700; color:#dc2626;">R$ 0,00</div>
                     </div>
                 </div>
@@ -498,6 +498,11 @@
                 <div class="input-group">
                     <label for="dataGanho">Data</label>
                     <input type="date" id="dataGanho" required>
+                </div>
+
+                <div class="input-group" style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="ganhoRecorrente" style="width:auto;">
+                    <label for="ganhoRecorrente" style="margin:0;">Isso se repete todo mês (salário, aluguel recebido, etc.)</label>
                 </div>
 
                 <div class="modal-actions">
