@@ -2228,9 +2228,21 @@ class FinanceApp {
         const diaCompra = compra.getDate();
 
         // Se a compra foi feita depois do fechamento, ela só entra na fatura
-        // do mês seguinte ao da compra (regra real de cartão de crédito).
+        // que fecha no mês seguinte ao da compra (regra real de cartão).
         let mesBase = compra.getMonth();
         if (diaCompra > cartao.diaFechamento) {
+            mesBase += 1;
+        }
+
+        // O vencimento nem sempre cai no mesmo mês em que a fatura FECHA.
+        // Quando o dia de vencimento é numericamente MENOR que o de
+        // fechamento (o caso mais comum: ex. fecha dia 25, vence dia 1), o
+        // vencimento só pode estar no mês SEGUINTE — não dá pra vencer no
+        // dia 1 antes de a fatura ainda nem ter fechado no dia 25 daquele
+        // mesmo mês. Bug real encontrado com dados de produção: uma compra
+        // feita ANTES do fechamento (ex. dia 15, fecha dia 25) estava
+        // vencendo no dia 1 do MESMO mês da compra, em vez do mês seguinte.
+        if (cartao.diaVencimento < cartao.diaFechamento) {
             mesBase += 1;
         }
 
