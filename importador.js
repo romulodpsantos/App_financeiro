@@ -193,10 +193,17 @@ function parseInterPDFLinhas(linhasTexto) {
 }
 
 async function parseInterPDF(arrayBuffer) {
-    const cabecalho = new Uint8Array(arrayBuffer.slice(0, 5));
-    const assinatura = String.fromCharCode(...cabecalho);
-    if (assinatura !== '%PDF-') {
-        throw new Error(`O arquivo não chegou como um PDF válido (${arrayBuffer.byteLength} byte(s) lidos). Tente escolher o arquivo de novo — em alguns celulares, arquivos do iCloud/Arquivos falham na primeira tentativa.`);
+    // A assinatura "%PDF-" pode vir alguns bytes depois do início do arquivo
+    // (comum em PDFs gerados/exportados por certas ferramentas, e é por isso
+    // que o próprio PDF.js procura por ela numa janela inicial em vez de
+    // exigir que esteja exatamente no byte 0). Uma versão anterior desta
+    // checagem exigia posição 0 e chegou a rejeitar um PDF real e completo
+    // do Inter só por causa disso — por isso a busca é numa janela, não uma
+    // comparação exata do início.
+    const inicio = new Uint8Array(arrayBuffer.slice(0, 1024));
+    const textoInicio = String.fromCharCode(...inicio);
+    if (!textoInicio.includes('%PDF-')) {
+        throw new Error(`O arquivo não parece ser um PDF (${arrayBuffer.byteLength} byte(s) lidos, assinatura "%PDF-" não encontrada). Confirme que escolheu o arquivo certo.`);
     }
 
     const linhas = await extrairLinhasDoPDF(arrayBuffer);
