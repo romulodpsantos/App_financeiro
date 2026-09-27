@@ -15,7 +15,8 @@ class FinanceApp {
             status: 'todos',
             pessoa: 'todos',
             data: '',
-            tipo: 'todos'
+            tipo: 'todos',
+            cartao: 'todos'
         };
         this.chartGastosGanhos = null;
         this.chartCategorias = null;
@@ -142,11 +143,13 @@ class FinanceApp {
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
         const filtroTipo = document.getElementById('filtroTipo');
+        const filtroCartao = document.getElementById('filtroCartao');
 
         if (filtroStatus) filtroStatus.addEventListener('change', () => this.aplicarFiltros());
         if (filtroPessoa) filtroPessoa.addEventListener('change', () => this.aplicarFiltros());
         if (filtroData) filtroData.addEventListener('change', () => this.aplicarFiltros());
         if (filtroTipo) filtroTipo.addEventListener('change', () => this.aplicarFiltros());
+        if (filtroCartao) filtroCartao.addEventListener('change', () => this.aplicarFiltros());
 
         console.log('✅ Eventos configurados!');
     }
@@ -336,9 +339,20 @@ class FinanceApp {
         try {
             if (idExistente) {
                 const index = this.gastos.findIndex(g => g.id === idExistente);
+                const gastoAntigo = index !== -1 ? this.gastos[index] : null;
+                const dataAntiga = gastoAntigo ? gastoAntigo.data : null;
                 const atualizado = await this.datastore.atualizar('gastos', idExistente, campos);
                 if (index !== -1 && atualizado) this.gastos[index] = { ...this.gastos[index], ...atualizado };
                 this.mostrarToast('Gasto atualizado!', 'success');
+
+                // Corrigiu a data de uma parcela de cartão? Desloca as
+                // parcelas SEGUINTES (ainda não pagas) pelo mesmo número de
+                // meses — foram todas calculadas a partir da data original
+                // da compra, que era a errada.
+                if (gastoAntigo && campos.data && campos.data !== dataAntiga &&
+                    gastoAntigo.compraCartaoId && gastoAntigo.parcelaNumero && gastoAntigo.totalParcelas) {
+                    await this.corrigirParcelasFuturas(gastoAntigo, dataAntiga, campos.data);
+                }
             } else {
                 const criado = await this.datastore.criar('gastos', { ...campos, pago: false, dataPagamento: null });
                 this.gastos.push(criado);
@@ -349,6 +363,37 @@ class FinanceApp {
         } catch (err) {
             this.tratarErroPersistencia(err);
         }
+    }
+
+    // Desloca as parcelas seguintes (mesma compra, número maior, ainda não
+    // pagas) pela mesma diferença de meses que a parcela corrigida sofreu —
+    // todas foram calculadas originalmente a partir da mesma data-base da
+    // compra, então se essa base estava errada, o erro se repete em todas.
+    // Não mexe em parcelas já pagas (o que já foi pago não muda de mês).
+    async corrigirParcelasFuturas(gastoOriginal, dataAntigaISO, dataNovaISO) {
+        const dataAntiga = this.parseDataLocal(dataAntigaISO);
+        const dataNova = this.parseDataLocal(dataNovaISO);
+        const deltaMeses = (dataNova.getFullYear() - dataAntiga.getFullYear()) * 12
+            + (dataNova.getMonth() - dataAntiga.getMonth());
+        if (deltaMeses === 0) return;
+
+        const parcelasFuturas = this.gastos.filter(g =>
+            g.compraCartaoId === gastoOriginal.compraCartaoId &&
+            g.parcelaNumero > gastoOriginal.parcelaNumero &&
+            !g.pago
+        );
+        if (parcelasFuturas.length === 0) return;
+
+        for (const parcela of parcelasFuturas) {
+            const dataAtual = this.parseDataLocal(parcela.data);
+            const novaData = new Date(dataAtual.getFullYear(), dataAtual.getMonth() + deltaMeses, dataAtual.getDate());
+            const novaDataISO = novaData.toISOString().split('T')[0];
+            const atualizado = await this.datastore.atualizar('gastos', parcela.id, { data: novaDataISO });
+            const idx = this.gastos.findIndex(g => g.id === parcela.id);
+            if (idx !== -1 && atualizado) this.gastos[idx] = { ...this.gastos[idx], ...atualizado };
+        }
+
+        this.mostrarToast(`${parcelasFuturas.length} parcela(s) seguinte(s) ajustada(s) automaticamente.`, 'info');
     }
 
     editarGasto(gastoId) {
@@ -950,12 +995,14 @@ class FinanceApp {
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
         const filtroTipo = document.getElementById('filtroTipo');
+        const filtroCartao = document.getElementById('filtroCartao');
 
         this.filtrosAtivos = {
             status: filtroStatus ? filtroStatus.value : 'todos',
             pessoa: filtroPessoa ? filtroPessoa.value : 'todos',
             data: filtroData ? filtroData.value : '',
-            tipo: filtroTipo ? filtroTipo.value : 'todos'
+            tipo: filtroTipo ? filtroTipo.value : 'todos',
+            cartao: filtroCartao ? filtroCartao.value : 'todos'
         };
         this.atualizarListaTransacoes();
     }
@@ -965,13 +1012,15 @@ class FinanceApp {
         const filtroPessoa = document.getElementById('filtroPessoa');
         const filtroData = document.getElementById('filtroData');
         const filtroTipo = document.getElementById('filtroTipo');
+        const filtroCartao = document.getElementById('filtroCartao');
 
         if (filtroStatus) filtroStatus.value = 'todos';
         if (filtroPessoa) filtroPessoa.value = 'todos';
         if (filtroData) filtroData.value = '';
         if (filtroTipo) filtroTipo.value = 'todos';
+        if (filtroCartao) filtroCartao.value = 'todos';
 
-        this.filtrosAtivos = { status: 'todos', pessoa: 'todos', data: '', tipo: 'todos' };
+        this.filtrosAtivos = { status: 'todos', pessoa: 'todos', data: '', tipo: 'todos', cartao: 'todos' };
         this.atualizarListaTransacoes();
     }
 
@@ -1447,6 +1496,14 @@ class FinanceApp {
             transacoesFiltradas = transacoesFiltradas.filter(t => {
                 if (t.tipo === 'ganho') return true;
                 return t.responsavel === this.filtrosAtivos.pessoa;
+            });
+        }
+
+        if (this.filtrosAtivos.cartao && this.filtrosAtivos.cartao !== 'todos') {
+            const cartaoIdFiltro = parseInt(this.filtrosAtivos.cartao, 10);
+            transacoesFiltradas = transacoesFiltradas.filter(t => {
+                if (t.tipo === 'ganho') return true;
+                return t.cartaoId === cartaoIdFiltro;
             });
         }
 
@@ -2015,10 +2072,18 @@ class FinanceApp {
 
     carregarSelectCartoes() {
         const cartaoCompra = document.getElementById('cartaoCompra');
-        
+
         if (cartaoCompra) {
             cartaoCompra.innerHTML = '<option value="">Selecione o cartão...</option>' +
                 this.cartoes.map(c => `<option value="${c.id}">💳 ${c.nome}</option>`).join('');
+        }
+
+        const filtroCartao = document.getElementById('filtroCartao');
+        if (filtroCartao) {
+            const selecionado = filtroCartao.value;
+            filtroCartao.innerHTML = '<option value="todos">Todos os cartões</option>' +
+                this.cartoes.map(c => `<option value="${c.id}">💳 ${c.nome}</option>`).join('');
+            if (selecionado) filtroCartao.value = selecionado;
         }
     }
 
