@@ -1536,19 +1536,49 @@ class FinanceApp {
 
     // ========== ATUALIZAR LISTA PESSOAS ==========
     atualizarListaPessoas() {
-        // Minha parte em TODAS as parcelas de cartão ainda não pagas (só o
-        // que é meu, não a fatura inteira) — pedido pra comparar contra o
-        // que eu ganho e ver se não estou gastando mais do que posso,
-        // separado da visão de "quanto tenho que pagar no total" que fica
-        // no Dashboard. Sem restringir a um mês: a data de uma compra de
-        // cartão é o VENCIMENTO da fatura (pode cair no mês seguinte,
-        // dependendo do fechamento), não o mês em que a compra foi feita —
-        // então "só este mês" mostraria menos do que a pessoa realmente
-        // deve no total.
-        const minhaParteCartoes = this.gastos
-            .filter(g => g.cartaoId && !g.pago && g.responsavel === 'Eu')
-            .reduce((sum, g) => sum + g.valor, 0);
-        this.atualizarElementoTexto('minha-parte-cartoes', this.formatarMoeda(minhaParteCartoes));
+        // Minha parte em TODAS as parcelas de cartão (só o que é meu, não a
+        // fatura inteira) — pedido pra comparar contra o que eu ganho e ver
+        // se não estou gastando mais do que posso, separado da visão de
+        // "quanto tenho que pagar no total" que fica no Dashboard. Mesmo
+        // formato visual de um card de pessoa (person-item), a pedido do
+        // usuário, com a mesma previsão por mês (usando as parcelas futuras
+        // já sintetizadas de obterProximasFaturas, pra nunca divergir do que
+        // aparece no modal "Ver próximas faturas" de cada cartão).
+        const containerMinhaParte = document.getElementById('minha-parte-cartoes-container');
+        if (containerMinhaParte) {
+            const gastosCartaoMeu = this.gastos.filter(g => g.cartaoId && g.responsavel === 'Eu');
+            const totalPendente = gastosCartaoMeu.filter(g => !g.pago).reduce((sum, g) => sum + g.valor, 0);
+            const totalPago = gastosCartaoMeu.filter(g => g.pago).reduce((sum, g) => sum + g.valor, 0);
+            const previsaoMensal = this.obterMinhaParteFaturasPorMes();
+
+            containerMinhaParte.innerHTML = `
+                <div class="person-item">
+                    <div class="person-info">
+                        <strong>💳 Minha parte em cartões</strong>
+                        <div class="person-stats">
+                            <div class="person-stat">
+                                <span class="stat-label">Pendente:</span>
+                                <span class="stat-value pendente">${this.formatarMoeda(totalPendente)}</span>
+                            </div>
+                            <div class="person-stat">
+                                <span class="stat-label">Já Pago:</span>
+                                <span class="stat-value pago">${this.formatarMoeda(totalPago)}</span>
+                            </div>
+                        </div>
+                        <div class="previsao-mensal">
+                            <h4>📅 Previsão por Mês</h4>
+                            ${previsaoMensal.map(previsao => `
+                                <div class="previsao-mes-item">
+                                    <span class="mes-label">${this.formatarMesNome(previsao.mes)}/${previsao.ano}:</span>
+                                    <span class="mes-valor">${this.formatarMoeda(previsao.total)}</span>
+                                    ${previsao.qtd > 0 ? `<small>(${previsao.qtd} parcela(s))</small>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
 
         const container = document.getElementById('lista-pessoas');
         if (!container) return;
@@ -2031,6 +2061,7 @@ class FinanceApp {
         const descricao = document.getElementById('descricaoCompraCartao');
         const valor = document.getElementById('valorCompraCartao');
         const categoria = document.getElementById('categoriaCompraCartao');
+        const responsavel = document.getElementById('responsavelCompraCartao');
         const parcelas = document.getElementById('parcelasCompra');
         const dataCompra = document.getElementById('dataCompraCartao');
 
@@ -2066,7 +2097,7 @@ class FinanceApp {
                 this.mostrarToast('Compra adicionada!', 'success');
 
                 // REGRA 4: Gera transações de gasto para o cartão
-                await this.gerarTransacoesCartao(criada);
+                await this.gerarTransacoesCartao(criada, responsavel ? responsavel.value : 'Eu');
             }
 
             this.fecharModal('compraCartao');
@@ -2078,7 +2109,7 @@ class FinanceApp {
     }
 
     // REGRA 4: Gerar transações para compras no cartão
-    async gerarTransacoesCartao(compra) {
+    async gerarTransacoesCartao(compra, responsavel = 'Eu') {
         const cartao = this.cartoes.find(c => c.id === compra.cartaoId);
         if (!cartao) return;
 
@@ -2105,7 +2136,7 @@ class FinanceApp {
                     descricao: `💳 ${compra.descricao} (${i}/${compra.parcelas})`,
                     valor: valorParcela,
                     categoria: compra.categoria,
-                    responsavel: 'Eu',
+                    responsavel,
                     data: dataVencimento,
                     pago: false,
                     dataPagamento: null,
@@ -2361,35 +2392,19 @@ class FinanceApp {
         return html;
     }
 
+    // Usa a mesma fonte de dados de obterProximasFaturas (que já inclui as
+    // parcelas futuras sintetizadas de fatura importada) — antes essa lista
+    // resumida do card e o modal "Ver próximas faturas" calculavam cada um
+    // do seu jeito e mostravam números DIFERENTES pro mesmo cartão. Limita
+    // a 6 meses aqui só pra manter a lista compacta embaixo do card; o
+    // detalhe completo (sem limite) fica no modal.
     calcularPrevisaoFaturas(cartaoId) {
-        const hoje = new Date();
-        const previsoes = [];
-        
-        // Calcula para os próximos 6 meses
-        for (let i = 0; i < 6; i++) {
-            const mesData = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
-            const mes = mesData.getMonth();
-            const ano = mesData.getFullYear();
-            
-            const gastosMes = this.gastos.filter(g => 
-                g.cartaoId === cartaoId && 
-                !g.pago
-            ).filter(gasto => {
-                const dataGasto = this.parseDataLocal(gasto.data);
-                return dataGasto.getMonth() === mes && dataGasto.getFullYear() === ano;
-            });
-
-            const total = gastosMes.reduce((sum, gasto) => sum + gasto.valor, 0);
-            
-            if (total > 0) {
-                previsoes.push({
-                    mes: `${this.formatarMesNome(mes)}/${ano.toString().slice(2)}`,
-                    valor: total
-                });
-            }
-        }
-        
-        return previsoes;
+        return this.obterProximasFaturas(cartaoId)
+            .slice(0, 6)
+            .map(f => ({
+                mes: `${this.formatarMesNome(f.mes)}/${f.ano.toString().slice(2)}`,
+                valor: f.total
+            }));
     }
 
     formatarMesNome(mes) {
@@ -2545,12 +2560,12 @@ class FinanceApp {
         const adicionar = (ano, mes, dataVencimento, valor, responsavel) => {
             const chave = `${ano}-${mes}`;
             if (!grupos.has(chave)) {
-                grupos.set(chave, { ano, mes, dataVencimento, total: 0, totalMeu: 0, totalOutros: 0, qtd: 0 });
+                grupos.set(chave, { ano, mes, dataVencimento, total: 0, totalMeu: 0, totalOutros: 0, qtd: 0, qtdMeu: 0 });
             }
             const grupo = grupos.get(chave);
             grupo.total += valor;
             grupo.qtd++;
-            if (responsavel === 'Eu') grupo.totalMeu += valor;
+            if (responsavel === 'Eu') { grupo.totalMeu += valor; grupo.qtdMeu++; }
             else grupo.totalOutros += valor;
         };
 
@@ -2565,6 +2580,26 @@ class FinanceApp {
             adicionar(p.ano, p.mes, p.dataISO, p.valor, p.responsavel);
         });
 
+        return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
+    }
+
+    // Minha parte (só "Eu") somada de TODOS os cartões, mês a mês — mesma
+    // fonte de dados de obterProximasFaturas (já com as parcelas futuras
+    // sintetizadas), só que agregada entre cartões em vez de por cartão.
+    // Usado pra mostrar "Minha parte em cartões" com o mesmo formato de
+    // "Previsão por Mês" que já existe pra cada pessoa.
+    obterMinhaParteFaturasPorMes() {
+        const grupos = new Map();
+        this.cartoes.forEach((cartao) => {
+            this.obterProximasFaturas(cartao.id).forEach((f) => {
+                if (f.totalMeu <= 0) return;
+                const chave = `${f.ano}-${f.mes}`;
+                if (!grupos.has(chave)) grupos.set(chave, { ano: f.ano, mes: f.mes, total: 0, qtd: 0 });
+                const grupo = grupos.get(chave);
+                grupo.total += f.totalMeu;
+                grupo.qtd += f.qtdMeu;
+            });
+        });
         return [...grupos.values()].sort((a, b) => a.ano - b.ano || a.mes - b.mes);
     }
 
@@ -2810,7 +2845,8 @@ class FinanceApp {
     carregarSelectPessoas() {
         const responsavelGasto = document.getElementById('responsavelGasto');
         const responsavelRecorrente = document.getElementById('responsavelRecorrente');
-        
+        const responsavelCompraCartao = document.getElementById('responsavelCompraCartao');
+
         const options = '<option value="Eu">👤 Eu</option>' +
             this.pessoas.map(p => `<option value="${p}">👤 ${p}</option>`).join('');
 
@@ -2819,6 +2855,9 @@ class FinanceApp {
         }
         if (responsavelRecorrente) {
             responsavelRecorrente.innerHTML = options;
+        }
+        if (responsavelCompraCartao) {
+            responsavelCompraCartao.innerHTML = options;
         }
     }
 

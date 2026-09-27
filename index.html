@@ -349,11 +349,7 @@
                     </button>
                 </div>
 
-                <div class="chart-card" style="margin-bottom: 16px; text-align:center;">
-                    <div style="color:#555; font-size:0.85em; font-weight:600;">💳 Minha parte em cartões (todas as parcelas pendentes)</div>
-                    <div id="minha-parte-cartoes" style="font-size:1.4em; font-weight:700; color:#333;">R$ 0,00</div>
-                    <div style="color:#888; font-size:0.8em; margin-top:2px;">Pra comparar com o que você ganha e ver se não está gastando mais do que pode</div>
-                </div>
+                <div id="minha-parte-cartoes-container" class="people-list" style="margin-bottom: 16px;"></div>
 
                 <div id="lista-pessoas" class="people-list">
                     <div class="empty-state">
@@ -735,6 +731,13 @@
                         <option value="moradia">🏠 Moradia</option>
                         <option value="vestuário">👕 Vestuário</option>
                         <option value="outros">📦 Outros</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="responsavelCompraCartao">Comprado por</label>
+                    <select id="responsavelCompraCartao" required>
+                        <option value="Eu">👤 Eu</option>
                     </select>
                 </div>
 

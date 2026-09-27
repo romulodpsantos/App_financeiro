@@ -1265,6 +1265,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
     color: var(--dark);
     font-size: 1.1em;
     font-weight: 700;
+    /* .card-actions fica com position:absolute no canto superior direito
+       (ver mais abaixo); com 5 ícones ali agora, sem esse respiro à direita
+       os ícones ficam por cima do nome do cartão, cobrindo parte do texto. */
+    padding-right: 150px;
+}
+
+@media (max-width: 480px) {
+    .card-info strong {
+        padding-right: 0;
+        padding-top: 34px;
+    }
 }
 
 .card-meta {

@@ -255,7 +255,9 @@ async function parseInterPDF(arrayBuffer) {
 const REGEX_LINHA_SANTANDER = /^(?:\d+\s+)?(\d{2})\/(\d{2})\s+(.+?)(?:\s+(\d{2})\/(\d{2}))?\s+(-?[\d.]+,\d{2})(?:\s+[\d.]+,\d{2})?$/;
 const REGEX_DATA_DDMMAAAA = /(\d{2})\/(\d{2})\/(\d{4})/;
 
-function extrairVencimentoSantander(linhasTexto) {
+// Usado por Santander e BB — ambos mostram "Vencimento" seguido da data,
+// às vezes em caixas/linhas separadas na reconstrução do PDF.js.
+function extrairVencimentoGenerico(linhasTexto) {
     for (let i = 0; i < linhasTexto.length; i++) {
         const linha = linhasTexto[i].trim();
         if (!/^vencimento\b/i.test(linha)) continue;
@@ -271,7 +273,7 @@ function extrairVencimentoSantander(linhasTexto) {
 
 function parseSantanderPDFLinhas(linhasTexto) {
     const transacoes = [];
-    const dataVencimento = extrairVencimentoSantander(linhasTexto);
+    const dataVencimento = extrairVencimentoGenerico(linhasTexto);
     const anoRef = dataVencimento ? parseInt(dataVencimento.slice(0, 4), 10) : new Date().getFullYear();
     const mesVencimento = dataVencimento ? parseInt(dataVencimento.slice(5, 7), 10) : null;
 
@@ -333,15 +335,97 @@ function parseSantanderPDFLinhas(linhasTexto) {
     return { transacoes, dataVencimento };
 }
 
+// ---- Parsing de PDF (fatura do Banco do Brasil / Ourocard) ----
+// Layout diferente do Santander: em vez de seções "Parcelamentos" /
+// "Despesas", o BB agrupa por CATEGORIA (ex. "Restaurantes", "Saúde",
+// "Compras parceladas" — nomes soltos, sem data, então já ficam de fora só
+// por a linha não começar com "DD/MM"). Cada lançamento tem cidade e um
+// código de país (2 letras, ex. "BR", "PE") entre a descrição e o valor —
+// esse código nem sempre aparece (taxas/encargos não têm), por isso é
+// opcional na regex. Compras parceladas trazem "PARC NN/NN" (às vezes
+// "TIT-PARC NN/NN") embutido no meio da descrição, não no fim como no
+// Santander.
+const REGEX_LINHA_BB = /^(\d{2})\/(\d{2})\s+(.+?)\s+(?:[A-Z]{2}\s+)?R\$\s*(-?[\d.]+,\d{2})\s*$/;
+const REGEX_PARCELA_BB = /\s*(?:TIT-)?PARC\s+(\d{2})\/(\d{2})\s*/i;
+
+function parseBBPDFLinhas(linhasTexto) {
+    const transacoes = [];
+    const dataVencimento = extrairVencimentoGenerico(linhasTexto);
+    const anoRef = dataVencimento ? parseInt(dataVencimento.slice(0, 4), 10) : new Date().getFullYear();
+    const mesVencimento = dataVencimento ? parseInt(dataVencimento.slice(5, 7), 10) : null;
+
+    let mesFechamento = mesVencimento !== null ? mesVencimento - 1 : null;
+    let anoFechamento = anoRef;
+    if (mesFechamento !== null && mesFechamento < 1) { mesFechamento = 12; anoFechamento -= 1; }
+
+    for (const linhaBruta of linhasTexto) {
+        const linha = linhaBruta.trim();
+        const m = linha.match(REGEX_LINHA_BB);
+        if (!m) continue;
+        const [, diaTxt, mesTxt, descBruta, valorTxt] = m;
+        const dia = parseInt(diaTxt, 10);
+        const mes = parseInt(mesTxt, 10);
+        if (mes < 1 || mes > 12 || dia < 1 || dia > 31) continue;
+
+        const matchParcela = descBruta.match(REGEX_PARCELA_BB);
+        const parcelaAtual = matchParcela ? parseInt(matchParcela[1], 10) : null;
+        const totalParcelas = matchParcela ? parseInt(matchParcela[2], 10) : null;
+        const descricao = (matchParcela ? descBruta.replace(REGEX_PARCELA_BB, ' ') : descBruta).replace(/\s+/g, ' ').trim();
+        if (!descricao) continue;
+
+        // Mesma lógica do Santander: compra parcelada mostra a data da
+        // compra ORIGINAL, que pode ser de meses atrás.
+        let ano = anoRef;
+        if (parcelaAtual && mesFechamento !== null) {
+            const mesesAtras = parcelaAtual - 1;
+            let mesAlvo = mesFechamento - mesesAtras;
+            let anoAlvo = anoFechamento;
+            while (mesAlvo < 1) { mesAlvo += 12; anoAlvo -= 1; }
+            if (mesAlvo === mes) ano = anoAlvo;
+            else if (mesVencimento !== null && mes - mesVencimento > 1) ano = anoRef - 1;
+        } else if (mesVencimento !== null && mes - mesVencimento > 1) {
+            ano = anoRef - 1;
+        }
+
+        const { valor } = paraValorBR(valorTxt);
+
+        transacoes.push({
+            data: `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+            descricao,
+            descricaoOriginal: descricao,
+            valor: Math.abs(valor),
+            parcelaNumero: parcelaAtual,
+            totalParcelas,
+            // Pagamentos/créditos (ex. pagamento da fatura anterior) vêm com
+            // valor negativo — mesma convenção do Santander.
+            ehCompra: valor > 0
+        });
+    }
+
+    return { transacoes, dataVencimento };
+}
+
 // ---- Dispatcher: identifica o banco pelo conteúdo do PDF e usa o parser certo ----
 async function parsePDFFatura(arrayBuffer) {
     verificarAssinaturaPDF(arrayBuffer);
     const linhas = await extrairLinhasDoPDF(arrayBuffer);
     const textoCompleto = linhas.join(' ').toLowerCase();
-    const ehSantander = textoCompleto.includes('santander');
-    const resultado = ehSantander ? parseSantanderPDFLinhas(linhas) : parseInterPDFLinhas(linhas);
+
+    let banco = 'inter';
+    let resultado;
+    if (textoCompleto.includes('santander')) {
+        banco = 'santander';
+        resultado = parseSantanderPDFLinhas(linhas);
+    } else if (textoCompleto.includes('banco do brasil') || textoCompleto.includes('ourocard')) {
+        banco = 'bb';
+        resultado = parseBBPDFLinhas(linhas);
+    } else {
+        resultado = parseInterPDFLinhas(linhas);
+    }
+
     if (resultado.transacoes.length === 0) {
-        throw new Error(`Não encontrei nenhum lançamento no PDF (identifiquei como fatura do ${ehSantander ? 'Santander' : 'Inter'}). O formato pode ter mudado, ou não reconheci o banco certo — avise para eu ajustar o importador.`);
+        const nomeBanco = { santander: 'Santander', bb: 'Banco do Brasil', inter: 'Inter' }[banco];
+        throw new Error(`Não encontrei nenhum lançamento no PDF (identifiquei como fatura do ${nomeBanco}). O formato pode ter mudado, ou não reconheci o banco certo — avise para eu ajustar o importador.`);
     }
     return resultado;
 }
@@ -390,6 +474,7 @@ window.Importador = {
     parseNubankCSV,
     parseInterPDF,
     parseSantanderPDFLinhas,
+    parseBBPDFLinhas,
     parsePDFFatura,
     categorizarPorDescricao,
     calcularHashLinha,
@@ -424,7 +509,7 @@ window.mostrarModalImportarFatura = function mostrarModalImportarFatura(app) {
                     <select id="importCartaoId">${opcoesCartao}</select>
                 </div>
                 <div class="input-group">
-                    <label>Arquivo (CSV do Nubank ou PDF do Inter/Santander)</label>
+                    <label>Arquivo (CSV do Nubank ou PDF do Inter/Santander/BB)</label>
                     <input type="file" id="importArquivo" accept=".csv,text/csv,.pdf,application/pdf">
                 </div>
                 <div class="input-group">
